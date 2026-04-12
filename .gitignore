@@ -205,3 +205,29 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Warrior Blood — secrets
+.env
+.env.*
+!.env.example
+
+# Large ML model files — use Git LFS or S3
+models/*.onnx
+models/*.tflite
+models/*.lgb
+ml/data/*.csv
+
+# MLflow experiment runs
+mlruns/
+ml/outputs/
+
+# Buildozer Android build artefacts
+mobile/.buildozer/
+mobile/bin/
+
+# SQLite dev database
+*.db
+*.sqlite
+
+# VS Code personal debug config
+.vscode/launch.json
