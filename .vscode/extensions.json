@@ -7,6 +7,13 @@
     "ms-python.debugpy",
     "njpwerner.autodocstring",
     "tamasfe.even-better-toml",
-    "timonwong.shellcheck"
+    "timonwong.shellcheck",
+    "ms-python.vscode-pylance",
+    "ms-azuretools.vscode-docker",
+    "eamodio.gitlens",
+    "github.vscode-pull-request-github",
+    "anthropic.claude-code",
+    "humao.rest-client",
+    "ms-vscode-remote.remote-ssh"
   ]
 }
