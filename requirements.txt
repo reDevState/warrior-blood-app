@@ -1,37 +1,46 @@
-aiosqlite==0.22.1
-alembic==1.18.4
-annotated-doc==0.0.4
-annotated-types==0.7.0
-anyio==4.13.0
-bcrypt==5.0.0
-cffi==2.0.0
-click==8.3.2
-colorama==0.4.6
-cryptography==46.0.7
-ecdsa==0.19.2
-fastapi==0.135.3
-greenlet==3.4.0
-h11==0.16.0
-httptools==0.7.1
-idna==3.11
-Mako==1.3.10
-MarkupSafe==3.0.3
+# Warrior Blood MVP — requirements
+# Core deps to run the API + dashboard. ML training deps are optional.
+# Install: pip install -r requirements.txt
+
+# Web framework
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+
+# Database (SQLite for MVP, swap DATABASE_URL for PostgreSQL)
+sqlalchemy[asyncio]==2.0.30
+aiosqlite==0.20.0
+
+# Data validation
+pydantic==2.7.1
+
+# Auth + encryption
+python-jose[cryptography]==3.3.0
+bcrypt==4.1.3
 passlib==1.7.4
-pyasn1==0.6.3
-pycparser==3.0
-pydantic==2.12.5
-pydantic-settings==2.13.1
-pydantic_core==2.41.5
-python-dotenv==1.2.2
-python-jose==3.5.0
-python-multipart==0.0.26
-PyYAML==6.0.3
-rsa==4.9.1
-six==1.17.0
-SQLAlchemy==2.0.49
-starlette==1.0.0
-typing-inspection==0.4.2
-typing_extensions==4.15.0
-uvicorn==0.44.0
-watchfiles==1.1.1
-websockets==16.0
+cryptography==42.0.7
+
+# Dashboard
+streamlit==1.35.0
+plotly==5.22.0
+requests==2.32.2
+
+# Testing
+pytest==8.2.1
+pytest-asyncio==0.23.7
+httpx==0.27.0
+coverage==7.5.1
+
+# Config
+python-dotenv==1.0.1
+
+# --- Optional: ML training (uncomment when running ml/train_model.py) ---
+# lightgbm==4.3.0
+# scikit-learn==1.5.0
+# imbalanced-learn==0.12.3
+# numpy==1.26.4
+# pandas==2.2.2
+# shap==0.45.0
+# mlflow==2.13.1
+# onnxmltools==1.12.0
+# skl2onnx==1.17.0
+# onnxruntime==1.18.0
