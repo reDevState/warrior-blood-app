@@ -103,7 +103,7 @@ async def require_chw(user: Annotated[dict, Depends(get_current_user)]) -> dict:
 @app.get("/", tags=["health"])
 async def root():
     """API root — returns version string."""
-    return {"message": "Warrior Blood API v0.1.0-mvp", "status": "ok"}
+    return {"message": "Warrior Blood API v0.1.0-mvp - Hi Renee!", "status": "ok"}
 
 
 @app.get("/health", tags=["health"])
