@@ -25,11 +25,11 @@ from jose import JWTError
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.auth import authenticate_user, create_access_token, decode_token, decrypt_phi, encrypt_phi
-from backend.database import create_tables, get_db
+from backend.auth import authenticate_user, create_access_token, decode_token, decrypt_phi, encrypt_phi, pwd_context
+from backend.database import AsyncSessionLocal, create_tables, get_db
 from backend.hydration import hydration_risk
 from backend.ml_predictor import predict
-from backend.models import AlertLog, DiaryEntry, Patient
+from backend.models import AlertLog, DiaryEntry, Patient, User
 from backend.schemas import (
     AlertRequest,
     AlertResponse,
@@ -48,10 +48,32 @@ logger = logging.getLogger("warrior_blood")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 
+_DEFAULT_USERS = [
+    {"username": "test_patient", "password": "testpassword", "role": "patient", "patient_id": "mvp-patient-001"},
+    {"username": "test_chw",     "password": "chwpassword",  "role": "chw",     "patient_id": None},
+]
+
+
+async def _seed_users() -> None:
+    """Create default MVP users if they don't already exist."""
+    async with AsyncSessionLocal() as db:
+        for u in _DEFAULT_USERS:
+            exists = await db.execute(select(User).where(User.username == u["username"]))
+            if not exists.scalar_one_or_none():
+                db.add(User(
+                    username=u["username"],
+                    hashed_password=pwd_context.hash(u["password"]),
+                    role=u["role"],
+                    patient_id=u["patient_id"],
+                ))
+        await db.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Create DB tables on startup (MVP — use Alembic in production)."""
+    """Create DB tables and seed default users on startup."""
     await create_tables()
+    await _seed_users()
     logger.info("Warrior Blood API v0.1.0 — MVP ready")
     yield
 
@@ -122,21 +144,22 @@ async def health(db: AsyncSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @app.post("/auth/token", response_model=TokenResponse, tags=["auth"])
-async def login(form: Annotated[OAuth2PasswordRequestForm, Depends()]):
+async def login(
+    form: Annotated[OAuth2PasswordRequestForm, Depends()],
+    db: AsyncSession = Depends(get_db),
+):
     """
     Issue a JWT access token.
 
     MVP users: test_patient / testpassword, test_chw / chwpassword.
     """
-    user = authenticate_user(form.username, form.password)
+    user = await authenticate_user(form.username, form.password, db)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
         )
-    token = create_access_token(
-        {"sub": user["username"], "role": user["role"]}
-    )
+    token = create_access_token({"sub": user.username, "role": user.role})
     return TokenResponse(access_token=token)
 
 

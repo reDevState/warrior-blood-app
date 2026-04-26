@@ -16,6 +16,10 @@ from datetime import datetime, timedelta, timezone
 from cryptography.fernet import Fernet
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from backend.models import User
+
 
 SECRET_KEY = os.getenv("SECRET_KEY", "warrior-blood-mvp-dev-key-change-in-production-32c")
 ALGORITHM = "HS256"
@@ -31,44 +35,19 @@ else:
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# MVP: in-memory user store — replace with DB lookup in production
-_USERS: dict[str, dict] = {
-    "test_patient": {
-        "hashed_password": pwd_context.hash("testpassword"),
-        "role": "patient",
-        "patient_id": "mvp-patient-001",
-    },
-    "test_chw": {
-        "hashed_password": pwd_context.hash("chwpassword"),
-        "role": "chw",
-        "patient_id": None,
-    },
-}
-
-
-def verify_password(plain: str, hashed: str) -> bool:
-    """Verify a plaintext password against a bcrypt hash."""
-    return pwd_context.verify(plain, hashed)
-
-
-def authenticate_user(username: str, password: str) -> dict | None:
-    """
-    Authenticate a user by username and password.
-
-    Args:
-        username: Registered username.
-        password: Plaintext password.
-
-    Returns:
-        User dict if valid, None otherwise.
-    """
-    user = _USERS.get(username)
+async def authenticate_user(
+    username: str, password: str, db: AsyncSession
+) -> User | None:
+    """Look up user in the database and verify password."""
+    result = await db.execute(
+        select(User).where(User.username == username, User.is_active == True)
+    )
+    user = result.scalar_one_or_none()
     if not user:
         return None
-    if not verify_password(password, user["hashed_password"]):
+    if not pwd_context.verify(password, user.hashed_password):
         return None
-    return {"username": username, **user}
-
+    return user
 
 def create_access_token(data: dict, expires_minutes: int = ACCESS_TOKEN_EXPIRE_MINUTES) -> str:
     """
