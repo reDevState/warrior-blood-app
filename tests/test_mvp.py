@@ -573,13 +573,10 @@ async def test_db_session_rolls_back_on_error():
     rolled_back = False
     async with AsyncSessionLocal() as session:
         try:
-            bad = Patient(
-                id="duplicate-id",
-                name_enc="x",
-                phone_enc=None,
-            )
-            session.add(bad)
-            session.add(bad)  # duplicate PK — should raise
+            session.add(Patient(id="duplicate-id", name_enc="x", phone_enc=None))
+            await session.flush()
+            # Second distinct object with same PK triggers IntegrityError on flush
+            session.add(Patient(id="duplicate-id", name_enc="y", phone_enc=None))
             await session.flush()
         except Exception:
             await session.rollback()

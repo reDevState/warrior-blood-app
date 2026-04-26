@@ -25,7 +25,7 @@ from jose import JWTError
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.auth import authenticate_user, create_access_token, decode_token, encrypt_phi
+from backend.auth import authenticate_user, create_access_token, decode_token, decrypt_phi, encrypt_phi
 from backend.database import create_tables, get_db
 from backend.hydration import hydration_risk
 from backend.ml_predictor import predict
@@ -165,6 +165,7 @@ async def register_patient(
     await db.flush()
     return PatientResponse(
         id=patient.id,
+        name=data.name,
         diagnosis_type=patient.diagnosis_type,
         enrolled_at=patient.enrolled_at,
     )
@@ -196,6 +197,7 @@ async def list_patients(
         out.append(
             PatientResponse(
                 id=p.id,
+                name=decrypt_phi(p.name_enc) if p.name_enc else None,
                 diagnosis_type=p.diagnosis_type,
                 enrolled_at=p.enrolled_at,
                 latest_risk_tier=latest.risk_tier if latest else None,
