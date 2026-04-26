@@ -14,12 +14,12 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from backend.auth import encrypt_phi
+from backend.auth import encrypt_phi, pwd_context
 from backend.database import Base, get_db
 from backend.hydration import hydration_risk
 from backend.main import app
 from backend.ml_predictor import predict
-from backend.models import Patient
+from backend.models import Patient, User
 
 # ---------------------------------------------------------------------------
 # Test database — SQLite in-memory (never use dev PostgreSQL for tests)
@@ -41,11 +41,25 @@ async def override_get_db():
             raise
 
 
+_SEED_USERS = [
+    ("test_patient", "testpassword", "patient"),
+    ("test_chw",     "chwpassword",  "chw"),
+]
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def setup_db():
-    """Create tables before each test, drop after."""
+    """Create tables and seed default users before each test, drop after."""
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    async with TestSessionLocal() as session:
+        for username, password, role in _SEED_USERS:
+            session.add(User(
+                username=username,
+                hashed_password=pwd_context.hash(password),
+                role=role,
+            ))
+        await session.commit()
     app.dependency_overrides[get_db] = override_get_db
     yield
     async with test_engine.begin() as conn:
