@@ -36,6 +36,7 @@ class PatientCreate(BaseModel):
 
 class PatientResponse(BaseModel):
     id: str
+    name: Optional[str] = None
     diagnosis_type: Optional[str]
     enrolled_at: datetime
     latest_risk_tier: Optional[str] = None

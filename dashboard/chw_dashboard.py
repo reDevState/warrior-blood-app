@@ -153,7 +153,8 @@ def triage_page():
         tier_colour = {"HIGH": "🔴", "MODERATE": "🟡", "LOW": "🟢"}.get(tier, "⚪")
         enrolled = p.get("enrolled_at", "")[:10]
 
-        with st.expander(f"{tier_colour} Patient {p['id'][:8]}...  |  {tier}  |  enrolled {enrolled}"):
+        display_name = p.get("name") or f"Patient {p['id'][:8]}..."
+        with st.expander(f"{tier_colour} {display_name}  |  {tier}  |  enrolled {enrolled}"):
             col_left, col_right = st.columns([2, 1])
 
             with col_left:

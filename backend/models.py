@@ -122,3 +122,20 @@ class AlertLog(Base):
     )
 
     patient: Mapped[Patient] = relationship(back_populates="alert_logs")
+
+class User(Base):
+    """Persistent CHW / admin / patient account (replaces in-memory _USERS dict)."""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    hashed_password: Mapped[str] = mapped_column(String(128), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)   # patient | chw | admin
+    patient_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("patients.id"), nullable=True
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )

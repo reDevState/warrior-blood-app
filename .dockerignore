@@ -1,0 +1,12 @@
+data/
+*.db
+*.db-shm
+*.db-wal
+.git
+.venv
+.vscode
+__pycache__
+*.pyc
+*.pyo
+.env
+.env.*
