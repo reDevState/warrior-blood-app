@@ -7,11 +7,11 @@ fastapi==0.111.0
 uvicorn[standard]==0.30.1
 
 # Database (SQLite for MVP, swap DATABASE_URL for PostgreSQL)
-sqlalchemy[asyncio]==2.0.30
+sqlalchemy[asyncio]==2.0.36
 aiosqlite==0.20.0
 
 # Data validation
-pydantic==2.7.1
+pydantic==2.10.6
 
 # Auth + encryption
 python-jose[cryptography]==3.3.0
@@ -32,6 +32,10 @@ coverage==7.5.1
 
 # Config
 python-dotenv==1.0.1
+
+alembic==1.13.1
+asyncpg==0.30.0
+psycopg2-binary==2.9.10
 
 # --- Optional: ML training (uncomment when running ml/train_model.py) ---
 # lightgbm==4.3.0
