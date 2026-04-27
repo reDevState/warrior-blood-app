@@ -38,14 +38,13 @@ alembic==1.13.1
 asyncpg==0.30.0
 psycopg2-binary==2.9.10
 
-# --- Optional: ML training (uncomment when running ml/train_model.py) ---
-# lightgbm==4.3.0
-# scikit-learn==1.5.0
-# imbalanced-learn==0.12.3
-# numpy==1.26.4
-# pandas==2.2.2
-# shap==0.45.0
-# mlflow==2.13.1
-# onnxmltools==1.12.0
-# skl2onnx==1.17.0
-# onnxruntime==1.18.0
+# ML — LightGBM ONNX pipeline (required for production predictor)
+lightgbm==4.3.0
+scikit-learn==1.5.0
+imbalanced-learn==0.12.3
+numpy==1.26.4
+pandas==2.2.2
+shap==0.45.0
+onnxruntime==1.18.0
+onnxmltools==1.12.0
+skl2onnx==1.17.0

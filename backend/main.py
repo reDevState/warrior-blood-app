@@ -351,6 +351,7 @@ async def patient_checkin(
         risk_score=prediction.risk_score,
         risk_tier=prediction.risk_tier,
         shap_factors=[SHAPFactor(**f) for f in prediction.shap_factors],
+        suggestion=prediction.suggestion,
         hydration_status=hydration.status,
         hydration_message=hydration.message,
         hydration_advice=hydration.advice,

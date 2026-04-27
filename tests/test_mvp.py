@@ -325,6 +325,55 @@ def test_predict_shap_factors_format():
         assert factor["direction"] in ("increasing", "decreasing")
 
 
+def test_predict_suggestion_non_empty():
+    """predict() returns a non-empty suggestion string for all risk tiers."""
+    for payload, expected_tier in [
+        ({"pain_score": 1, "fluid_intake_glasses": 8, "urine_colour": 2, "med_taken": True}, "LOW"),
+        ({"pain_score": 9, "fever_present": True, "fluid_intake_glasses": 1,
+          "urine_colour": 8, "med_taken": False, "sleep_hours": 3}, "HIGH"),
+    ]:
+        result = predict(payload)
+        assert isinstance(result.suggestion, str)
+        assert len(result.suggestion) > 0
+        assert result.risk_tier == expected_tier
+
+
+def test_feature_vector_to_list():
+    """FeatureVector.to_list() returns a list of exactly 16 floats."""
+    from ml.features import FeatureVector, FEATURE_NAMES
+    fv = FeatureVector(pain_score=5.0, urine_colour=3.0)
+    values = fv.to_list()
+    assert len(values) == len(FEATURE_NAMES) == 16
+    assert values[0] == 5.0   # pain_score is first
+    assert values[6] == 3.0   # urine_colour is seventh
+
+
+def test_feature_names_matches_feature_vector_fields():
+    """FEATURE_NAMES must exactly match FeatureVector dataclass fields in order."""
+    from ml.features import FeatureVector, FEATURE_NAMES
+    import dataclasses
+    field_names = [f.name for f in dataclasses.fields(FeatureVector)]
+    assert field_names == FEATURE_NAMES
+
+
+def test_generate_synthetic_data_shape():
+    """generate_synthetic_data produces correct row count and VOC rate ~3-15%."""
+    from ml.train_model import generate_synthetic_data
+    df = generate_synthetic_data(n_patients=5, n_days=30)
+    assert len(df) == 150
+    assert "voc_72h" in df.columns
+    assert 0.02 <= df["voc_72h"].mean() <= 0.30
+
+
+def test_generate_synthetic_data_all_features_present():
+    """All 16 FEATURE_NAMES columns are present in the generated dataset."""
+    from ml.features import FEATURE_NAMES
+    from ml.train_model import generate_synthetic_data
+    df = generate_synthetic_data(n_patients=2, n_days=10)
+    for col in FEATURE_NAMES:
+        assert col in df.columns, f"Missing column: {col}"
+
+
 # ---------------------------------------------------------------------------
 # Patient list and history tests
 # ---------------------------------------------------------------------------
@@ -537,6 +586,27 @@ async def test_register_patient_full_fields(client):
     data = resp.json()
     assert "id" in data
     assert data["diagnosis_type"] == "HbSS"
+
+
+@pytest.mark.asyncio
+async def test_checkin_returns_suggestion(client, patient_id):
+    """Check-in response includes a non-empty suggestion string."""
+    token = await _patient_token(client)
+    resp = await client.post(
+        "/checkin",
+        json={
+            "patient_id": patient_id,
+            "pain_score": 5,
+            "fluid_intake_glasses": 5,
+            "urine_colour": 4,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "suggestion" in data
+    assert isinstance(data["suggestion"], str)
+    assert len(data["suggestion"]) > 0
 
 
 @pytest.mark.asyncio
