@@ -29,7 +29,7 @@ from backend.auth import authenticate_user, create_access_token, decode_token, d
 from backend.database import AsyncSessionLocal, create_tables, get_db
 from backend.hydration import hydration_risk
 from backend.ml_predictor import predict
-from backend.models import AlertLog, DiaryEntry, PainDiaryEntry, Patient, User
+from backend.models import AlertLog, DiaryEntry, HydrationEntry, PainDiaryEntry, Patient, User
 from backend.pain_analysis import compute_pain_trend
 from backend.schemas import (
     AlertRequest,
@@ -37,6 +37,8 @@ from backend.schemas import (
     CheckinRequest,
     CheckinResponse,
     DiaryEntryResponse,
+    HydrationLogRequest,
+    HydrationLogResponse,
     PainDiaryRequest,
     PainDiaryResponse,
     PatientCreate,
@@ -543,3 +545,103 @@ async def pain_history(
         }
         for e in result.scalars().all()
     ]
+
+
+# ---------------------------------------------------------------------------
+# Hydration diary
+# ---------------------------------------------------------------------------
+
+def _hydration_suggestion(status: str, remaining_ml: int, drink_type: str) -> str:
+    """Return a plain-English hydration suggestion based on current status."""
+    glasses_left = remaining_ml // 250
+    if status == "SEVERE_RISK":
+        return (
+            "You are severely dehydrated. Drink water NOW — at least 2 large glasses. "
+            "Contact your CHW immediately if you feel dizzy or cannot drink."
+        )
+    if status == "MODERATE_RISK":
+        return (
+            f"You need more fluids. Try to drink {glasses_left} more glasses of "
+            "water before bedtime."
+        )
+    if drink_type in ("COFFEE", "TEA"):
+        return "Coffee and tea have a mild diuretic effect. Follow this with a glass of water."
+    if status == "WELL_HYDRATED":
+        return "Great hydration today! Keep sipping water regularly."
+    return f"Keep going — aim for {glasses_left} more glasses of water today."
+
+
+@app.post("/hydration", response_model=HydrationLogResponse, tags=["hydration"])
+async def log_hydration(
+    data: HydrationLogRequest,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Log an individual drink to the hydration diary.
+
+    Computes the running daily total, runs hydration risk assessment,
+    and returns a personalised hydration suggestion.
+    Coffee and tea are stored at 80% of their volume (mild diuretic effect).
+    """
+    patient = await db.get(Patient, data.patient_id)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    effective_ml = (
+        int(data.drink_volume_ml * 0.8)
+        if data.drink_type in ("COFFEE", "TEA")
+        else data.drink_volume_ml
+    )
+
+    today = datetime.utcnow().date()
+    result = await db.execute(
+        select(HydrationEntry)
+        .where(
+            HydrationEntry.patient_id == data.patient_id,
+            HydrationEntry.entry_date == today,
+        )
+    )
+    prior_ml = sum(e.drink_volume_ml for e in result.scalars().all())
+    daily_total = prior_ml + effective_ml
+
+    glasses = daily_total // 250
+    h = hydration_risk(
+        fluid_intake_glasses=glasses,
+        urine_colour=data.urine_colour or 3,
+        thirst_level=data.thirst_level,
+        dry_mouth=data.dry_mouth,
+    )
+
+    remaining_ml = max(0, 2000 - daily_total)
+    suggestion = _hydration_suggestion(h.status, remaining_ml, data.drink_type)
+
+    entry = HydrationEntry(
+        patient_id=data.patient_id,
+        entry_date=today,
+        drink_type=data.drink_type,
+        drink_volume_ml=effective_ml,
+        daily_total_ml=daily_total,
+        urine_colour=data.urine_colour,
+        thirst_level=data.thirst_level,
+        dry_mouth=data.dry_mouth,
+        dizziness=data.dizziness,
+        headache=data.headache,
+        dark_urine_flag=(data.urine_colour or 0) >= 6,
+    )
+    db.add(entry)
+    await db.flush()
+
+    return HydrationLogResponse(
+        entry_id=entry.id,
+        patient_id=data.patient_id,
+        drink_type=data.drink_type,
+        drink_volume_ml=effective_ml,
+        daily_total_ml=daily_total,
+        daily_total_glasses=round(daily_total / 250, 1),
+        hydration_status=h.status,
+        hydration_message=h.message,
+        hydration_advice=h.advice,
+        suggestion=suggestion,
+        logged_at=entry.logged_at,
+    )

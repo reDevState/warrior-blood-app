@@ -47,6 +47,9 @@ class Patient(Base):
     pain_entries: Mapped[list["PainDiaryEntry"]] = relationship(
         back_populates="patient", cascade="all, delete-orphan"
     )
+    hydration_entries: Mapped[list["HydrationEntry"]] = relationship(
+        back_populates="patient", cascade="all, delete-orphan"
+    )
 
 
 class DiaryEntry(Base):
@@ -168,6 +171,44 @@ class PainDiaryEntry(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     patient: Mapped[Patient] = relationship(back_populates="pain_entries")
+
+
+class HydrationEntry(Base):
+    """
+    Hydration diary entry — may be logged multiple times daily.
+
+    Tracks individual drinks by type and cumulative daily intake.
+    Urine colour uses the Armstrong (1994) 1-8 chart.
+    Ref: Yallop et al. (2007), WHO (2005)
+    """
+
+    __tablename__ = "hydration_entries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    patient_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("patients.id"), nullable=False, index=True
+    )
+    logged_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
+
+    # Drink details
+    drink_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Effective volume (ml) — coffee/tea stored at 80% to account for diuretic effect
+    drink_volume_ml: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Running daily total across all entries for this patient-date
+    daily_total_ml: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Urine colour at time of logging (Armstrong 1994, 1–8)
+    urine_colour: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Dehydration symptoms at time of logging
+    thirst_level: Mapped[int] = mapped_column(Integer, default=1)  # 1–4
+    dry_mouth: Mapped[bool] = mapped_column(Boolean, default=False)
+    dizziness: Mapped[bool] = mapped_column(Boolean, default=False)
+    headache: Mapped[bool] = mapped_column(Boolean, default=False)
+    dark_urine_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    patient: Mapped[Patient] = relationship(back_populates="hydration_entries")
 
 
 class User(Base):

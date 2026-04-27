@@ -176,3 +176,32 @@ class PainDiaryResponse(BaseModel):
     pain_slope_3d: Optional[float]
     suggestion: str
     recorded_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Hydration diary
+# ---------------------------------------------------------------------------
+
+class HydrationLogRequest(BaseModel):
+    patient_id: str
+    drink_type: str = Field(..., pattern="^(WATER|JUICE|MILK|TEA|COFFEE|SODA|OTHER)$")
+    drink_volume_ml: int = Field(..., ge=50, le=2000)
+    urine_colour: Optional[int] = Field(None, ge=1, le=8)
+    thirst_level: int = Field(1, ge=1, le=4)
+    dry_mouth: bool = False
+    dizziness: bool = False
+    headache: bool = False
+
+
+class HydrationLogResponse(BaseModel):
+    entry_id: str
+    patient_id: str
+    drink_type: str
+    drink_volume_ml: int
+    daily_total_ml: int
+    daily_total_glasses: float
+    hydration_status: str
+    hydration_message: str
+    hydration_advice: str
+    suggestion: str
+    logged_at: datetime

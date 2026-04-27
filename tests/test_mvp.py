@@ -629,6 +629,74 @@ def test_compute_pain_trend_breakthrough():
     assert trend.is_breakthrough is True
 
 
+# ---------------------------------------------------------------------------
+# Hydration diary tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_log_hydration_basic(client, patient_id):
+    """Water entry returns correct fields and a suggestion string."""
+    token = await _patient_token(client)
+    resp = await client.post(
+        "/hydration",
+        json={"patient_id": patient_id, "drink_type": "WATER", "drink_volume_ml": 250},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["drink_volume_ml"] == 250
+    assert data["daily_total_ml"] == 250
+    assert data["daily_total_glasses"] == 1.0
+    assert "hydration_status" in data
+    assert isinstance(data["suggestion"], str)
+    assert len(data["suggestion"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_log_hydration_coffee_diuretic(client, patient_id):
+    """Coffee volume is stored at 80% to account for diuretic effect."""
+    token = await _patient_token(client)
+    resp = await client.post(
+        "/hydration",
+        json={"patient_id": patient_id, "drink_type": "COFFEE", "drink_volume_ml": 250},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["drink_volume_ml"] == 200  # 250 * 0.8
+
+
+@pytest.mark.asyncio
+async def test_log_hydration_invalid_drink_type(client, patient_id):
+    """Drink type not in the allowed set returns 422."""
+    token = await _patient_token(client)
+    resp = await client.post(
+        "/hydration",
+        json={"patient_id": patient_id, "drink_type": "BEER", "drink_volume_ml": 330},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_log_hydration_daily_total_accumulates(client, patient_id):
+    """Daily total increases correctly across multiple entries."""
+    token = await _patient_token(client)
+    for _ in range(3):
+        await client.post(
+            "/hydration",
+            json={"patient_id": patient_id, "drink_type": "WATER", "drink_volume_ml": 250},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    resp = await client.post(
+        "/hydration",
+        json={"patient_id": patient_id, "drink_type": "WATER", "drink_volume_ml": 250},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["daily_total_ml"] == 1000
+    assert resp.json()["daily_total_glasses"] == 4.0
+
+
 @pytest.mark.asyncio
 async def test_db_session_rolls_back_on_error():
     """get_db rolls back the session if an exception is raised mid-transaction."""
