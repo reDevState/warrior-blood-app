@@ -52,7 +52,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 
 _DEFAULT_USERS = [
-    {"username": "test_patient", "password": "testpassword", "role": "patient", "patient_id": "mvp-patient-001"},
+    {"username": "test_patient", "password": "testpassword", "role": "patient", "patient_id": None},
     {"username": "test_chw",     "password": "chwpassword",  "role": "chw",     "patient_id": None},
 ]
 

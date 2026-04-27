@@ -1,16 +1,42 @@
 # Warrior Blood MVP — Docker Compose
-# Runs API + Dashboard with SQLite (no PostgreSQL/Redis needed for MVP)
-# Production: swap to docker-compose.prod.yml which adds PostgreSQL + Redis + Celery
+# Services: PostgreSQL, Redis (stub), API, Dashboard.
+# Run: docker compose up -d
+# Migrate: docker compose exec api alembic upgrade head
 
 services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: warrior
+      POSTGRES_PASSWORD: blood
+      POSTGRES_DB: warriorblood
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U warrior -d warriorblood"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
   api:
     build: .
     ports:
       - "8000:8000"
     env_file:
       - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     volumes:
-      - ./data:/app/data  # persist SQLite
       - ./models:/app/models
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
@@ -30,3 +56,6 @@ services:
     depends_on:
       - api
     command: streamlit run dashboard/chw_dashboard.py --server.port 8501 --server.address 0.0.0.0
+
+volumes:
+  postgres_data:
