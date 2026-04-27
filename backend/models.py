@@ -77,9 +77,15 @@ class DiaryEntry(Base):
     med_taken: Mapped[bool] = mapped_column(Boolean, default=True)
     sleep_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    # Environmental (from OpenWeatherMap — may be None if offline)
+    # Environmental (from OpenWeatherMap — None if offline or no lat/lon supplied)
     ambient_temp_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    feels_like_c: Mapped[float | None] = mapped_column(Float, nullable=True)
     humidity_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    aqi: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pm25_ugm3: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cold_stress_alert: Mapped[bool] = mapped_column(Boolean, default=False)
+    heat_stress_alert: Mapped[bool] = mapped_column(Boolean, default=False)
+    aqi_alert: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # ML output
     risk_score: Mapped[float | None] = mapped_column(Float, nullable=True)

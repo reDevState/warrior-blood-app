@@ -93,6 +93,7 @@ class CheckinResponse(BaseModel):
     hydration_status: str    # WELL_HYDRATED | MILD_RISK | MODERATE_RISK | SEVERE_RISK
     hydration_message: str
     hydration_advice: str
+    weather_alerts: list[str] = []
     created_at: datetime
 
 

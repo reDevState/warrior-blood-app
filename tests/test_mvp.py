@@ -697,6 +697,80 @@ async def test_log_hydration_daily_total_accumulates(client, patient_id):
     assert resp.json()["daily_total_glasses"] == 4.0
 
 
+# ---------------------------------------------------------------------------
+# Weather integration tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_checkin_with_location_degrades_gracefully(client, patient_id):
+    """Check-in with lat/lon but no API key returns 200 with empty weather_alerts."""
+    token = await _patient_token(client)
+    resp = await client.post(
+        "/checkin",
+        json={
+            "patient_id": patient_id,
+            "pain_score": 3,
+            "fluid_intake_glasses": 6,
+            "urine_colour": 3,
+            "latitude": 6.5244,
+            "longitude": 3.3792,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "weather_alerts" in data
+    assert isinstance(data["weather_alerts"], list)
+
+
+@pytest.mark.asyncio
+async def test_checkin_without_location_returns_empty_alerts(client, patient_id):
+    """Check-in without lat/lon still succeeds and returns empty weather_alerts."""
+    token = await _patient_token(client)
+    resp = await client.post(
+        "/checkin",
+        json={
+            "patient_id": patient_id,
+            "pain_score": 2,
+            "fluid_intake_glasses": 8,
+            "urine_colour": 2,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["weather_alerts"] == []
+
+
+def test_weather_client_returns_offline_without_api_key():
+    """get_weather returns offline WeatherData when no API key is configured."""
+    from backend.weather import WeatherData, get_weather
+    import os
+    original = os.environ.pop("OPENWEATHERMAP_API_KEY", None)
+    try:
+        result = get_weather(6.5244, 3.3792)
+        assert isinstance(result, WeatherData)
+        assert result.source == "no_api_key"
+        assert result.ambient_temp_c is None
+    finally:
+        if original is not None:
+            os.environ["OPENWEATHERMAP_API_KEY"] = original
+
+
+def test_weather_data_cold_stress_flag():
+    """WeatherData with temp < 15°C sets cold_stress_alert."""
+    from backend.weather import WeatherData
+    w = WeatherData(ambient_temp_c=10.0, cold_stress_alert=True)
+    assert w.cold_stress_alert is True
+    assert w.heat_stress_alert is False
+
+
+def test_weather_data_aqi_alert_flag():
+    """WeatherData with AQI >= 3 sets aqi_alert."""
+    from backend.weather import WeatherData
+    w = WeatherData(aqi=3, aqi_alert=True)
+    assert w.aqi_alert is True
+
+
 @pytest.mark.asyncio
 async def test_db_session_rolls_back_on_error():
     """get_db rolls back the session if an exception is raised mid-transaction."""

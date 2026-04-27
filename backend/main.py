@@ -31,6 +31,7 @@ from backend.hydration import hydration_risk
 from backend.ml_predictor import predict
 from backend.models import AlertLog, DiaryEntry, HydrationEntry, PainDiaryEntry, Patient, User
 from backend.pain_analysis import compute_pain_trend
+from backend.weather import WeatherData, get_weather
 from backend.schemas import (
     AlertRequest,
     AlertResponse,
@@ -261,7 +262,27 @@ async def patient_checkin(
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
 
-    # Run ML prediction
+    # Fetch weather — degrades gracefully when offline or lat/lon absent
+    weather: WeatherData = WeatherData()
+    if data.latitude and data.longitude:
+        weather = get_weather(data.latitude, data.longitude)
+
+    # Collect weather alerts for patient-facing response
+    weather_alerts: list[str] = []
+    if weather.cold_stress_alert:
+        weather_alerts.append(
+            f"Cold stress alert: {weather.ambient_temp_c}°C — keep warm, dress in layers."
+        )
+    if weather.heat_stress_alert:
+        weather_alerts.append(
+            f"Heat stress alert: {weather.ambient_temp_c}°C — drink extra fluids, stay in shade."
+        )
+    if weather.aqi_alert:
+        weather_alerts.append(
+            "Poor air quality today — avoid outdoor exertion and keep windows closed."
+        )
+
+    # Run ML prediction (weather features forwarded for future ONNX model)
     prediction = predict({
         "pain_score": data.pain_score,
         "body_temp_c": data.body_temp_c,
@@ -270,6 +291,9 @@ async def patient_checkin(
         "urine_colour": data.urine_colour,
         "med_taken": data.med_taken,
         "sleep_hours": data.sleep_hours,
+        "ambient_temp_c": weather.ambient_temp_c,
+        "humidity_pct": weather.humidity_pct,
+        "aqi": weather.aqi,
     })
 
     # Run hydration risk scoring
@@ -280,7 +304,7 @@ async def patient_checkin(
         dry_mouth=data.dry_mouth,
     )
 
-    # Persist diary entry
+    # Persist diary entry with weather snapshot
     entry = DiaryEntry(
         patient_id=data.patient_id,
         entry_date=date.today(),
@@ -291,6 +315,14 @@ async def patient_checkin(
         urine_colour=data.urine_colour,
         med_taken=data.med_taken,
         sleep_hours=data.sleep_hours,
+        ambient_temp_c=weather.ambient_temp_c,
+        feels_like_c=weather.feels_like_c,
+        humidity_pct=weather.humidity_pct,
+        aqi=weather.aqi,
+        pm25_ugm3=weather.pm25_ugm3,
+        cold_stress_alert=weather.cold_stress_alert,
+        heat_stress_alert=weather.heat_stress_alert,
+        aqi_alert=weather.aqi_alert,
         risk_score=prediction.risk_score,
         risk_tier=prediction.risk_tier,
         hydration_status=hydration.status,
@@ -322,6 +354,7 @@ async def patient_checkin(
         hydration_status=hydration.status,
         hydration_message=hydration.message,
         hydration_advice=hydration.advice,
+        weather_alerts=weather_alerts,
         created_at=entry.created_at,
     )
 
