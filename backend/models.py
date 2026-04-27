@@ -44,6 +44,9 @@ class Patient(Base):
     alert_logs: Mapped[list[AlertLog]] = relationship(
         back_populates="patient", cascade="all, delete-orphan"
     )
+    pain_entries: Mapped[list["PainDiaryEntry"]] = relationship(
+        back_populates="patient", cascade="all, delete-orphan"
+    )
 
 
 class DiaryEntry(Base):
@@ -122,6 +125,50 @@ class AlertLog(Base):
     )
 
     patient: Mapped[Patient] = relationship(back_populates="alert_logs")
+
+
+class PainDiaryEntry(Base):
+    """
+    Detailed pain diary entry — one or more per day per patient.
+    Captures location, triggers, analgesic use, and breakthrough events.
+    Ref: Brandow et al. (2020), Smith et al. (2008)
+    """
+
+    __tablename__ = "pain_diary_entries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    patient_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("patients.id"), nullable=False, index=True
+    )
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    pain_score: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Body locations stored as comma-separated codes
+    # Valid: CHEST BACK ABDOMEN L_ARM R_ARM L_LEG R_LEG HEAD OTHER
+    pain_locations: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    # Trigger factors
+    trigger_cold: Mapped[bool] = mapped_column(Boolean, default=False)
+    trigger_stress: Mapped[bool] = mapped_column(Boolean, default=False)
+    trigger_exercise: Mapped[bool] = mapped_column(Boolean, default=False)
+    trigger_infection: Mapped[bool] = mapped_column(Boolean, default=False)
+    trigger_dehydration: Mapped[bool] = mapped_column(Boolean, default=False)
+    trigger_other: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    # Analgesic use
+    took_paracetamol: Mapped[bool] = mapped_column(Boolean, default=False)
+    took_ibuprofen: Mapped[bool] = mapped_column(Boolean, default=False)
+    took_opioid: Mapped[bool] = mapped_column(Boolean, default=False)
+    pain_relief_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 0–3
+
+    # Breakthrough: sudden spike >= 3 points above 7-day mean and score >= 7
+    is_breakthrough: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    patient: Mapped[Patient] = relationship(back_populates="pain_entries")
+
 
 class User(Base):
     """Persistent CHW / admin / patient account (replaces in-memory _USERS dict)."""

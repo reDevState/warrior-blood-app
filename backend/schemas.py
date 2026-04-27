@@ -133,3 +133,46 @@ class AlertResponse(BaseModel):
     channel: str
     message: str
     queued_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Pain diary
+# ---------------------------------------------------------------------------
+
+class PainDiaryRequest(BaseModel):
+    patient_id: str
+    pain_score: int = Field(..., ge=0, le=10)
+    pain_locations: Optional[list[str]] = None
+    trigger_cold: bool = False
+    trigger_stress: bool = False
+    trigger_exercise: bool = False
+    trigger_infection: bool = False
+    trigger_dehydration: bool = False
+    trigger_other: Optional[str] = None
+    took_paracetamol: bool = False
+    took_ibuprofen: bool = False
+    took_opioid: bool = False
+    pain_relief_rating: Optional[int] = Field(None, ge=0, le=3)
+    notes: Optional[str] = None
+
+    @field_validator("pain_locations")
+    @classmethod
+    def validate_locations(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        valid = {"CHEST", "BACK", "ABDOMEN", "L_ARM", "R_ARM", "L_LEG", "R_LEG", "HEAD", "OTHER"}
+        if v:
+            invalid = [x for x in v if x not in valid]
+            if invalid:
+                raise ValueError(f"Invalid pain locations: {invalid}")
+        return v
+
+
+class PainDiaryResponse(BaseModel):
+    entry_id: str
+    patient_id: str
+    pain_score: int
+    pain_locations: Optional[list[str]]
+    is_breakthrough: bool
+    chest_pain_alert: bool
+    pain_slope_3d: Optional[float]
+    suggestion: str
+    recorded_at: datetime

@@ -578,14 +578,62 @@ async def test_alert_invalid_channel(client, patient_id):
     assert resp.status_code == 422
 
 
+# ---------------------------------------------------------------------------
+# Pain diary tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_log_pain_entry_basic(client, patient_id):
+    """Basic pain diary entry returns correct score and a suggestion string."""
+    token = await _patient_token(client)
+    resp = await client.post(
+        "/pain",
+        json={"patient_id": patient_id, "pain_score": 5, "pain_locations": ["BACK"]},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["pain_score"] == 5
+    assert "suggestion" in data
+    assert isinstance(data["suggestion"], str)
+    assert len(data["suggestion"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_chest_pain_triggers_alert(client, patient_id):
+    """Chest pain location sets chest_pain_alert and returns hospital advice."""
+    token = await _patient_token(client)
+    resp = await client.post(
+        "/pain",
+        json={"patient_id": patient_id, "pain_score": 8, "pain_locations": ["CHEST", "BACK"]},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["chest_pain_alert"] is True
+    assert "hospital" in data["suggestion"].lower()
+
+
+def test_compute_pain_trend_rising():
+    """Rising pain scores over 3 days produce a positive slope and is_rising flag."""
+    from backend.pain_analysis import compute_pain_trend
+    trend = compute_pain_trend([2, 4, 5], 7, ["BACK"])
+    assert trend.is_rising is True
+    assert trend.slope_3d > 0
+
+
+def test_compute_pain_trend_breakthrough():
+    """Score >= mean_7d + 3 and >= 7 flags a breakthrough event."""
+    from backend.pain_analysis import compute_pain_trend
+    trend = compute_pain_trend([2, 2, 2, 2, 2, 2, 2], 9, None)
+    assert trend.is_breakthrough is True
+
+
 @pytest.mark.asyncio
 async def test_db_session_rolls_back_on_error():
     """get_db rolls back the session if an exception is raised mid-transaction."""
-    from backend.database import AsyncSessionLocal
-    from backend.models import Patient
-
     rolled_back = False
-    async with AsyncSessionLocal() as session:
+    async with TestSessionLocal() as session:
         try:
             session.add(Patient(id="duplicate-id", name_enc="x", phone_enc=None))
             await session.flush()

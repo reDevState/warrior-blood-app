@@ -29,13 +29,16 @@ from backend.auth import authenticate_user, create_access_token, decode_token, d
 from backend.database import AsyncSessionLocal, create_tables, get_db
 from backend.hydration import hydration_risk
 from backend.ml_predictor import predict
-from backend.models import AlertLog, DiaryEntry, Patient, User
+from backend.models import AlertLog, DiaryEntry, PainDiaryEntry, Patient, User
+from backend.pain_analysis import compute_pain_trend
 from backend.schemas import (
     AlertRequest,
     AlertResponse,
     CheckinRequest,
     CheckinResponse,
     DiaryEntryResponse,
+    PainDiaryRequest,
+    PainDiaryResponse,
     PatientCreate,
     PatientResponse,
     SHAPFactor,
@@ -395,3 +398,148 @@ async def send_alert(
         message=data.message,
         queued_at=alert.sent_at,
     )
+
+
+# ---------------------------------------------------------------------------
+# Pain diary
+# ---------------------------------------------------------------------------
+
+def _pain_suggestion(trend, data: PainDiaryRequest) -> str:
+    """Return a plain-English self-care suggestion based on the pain trend."""
+    if trend.is_chest_pain:
+        return (
+            "Chest pain can be a sign of acute chest syndrome — a medical emergency. "
+            "Go to your nearest hospital immediately or call your CHW."
+        )
+    if trend.is_breakthrough:
+        return (
+            "You are having a breakthrough pain event. "
+            "Take your prescribed analgesics now, drink 2 glasses of water, "
+            "rest, and contact your CHW."
+        )
+    if trend.is_rising:
+        return (
+            "Your pain has been rising over the past 3 days. "
+            "Increase fluids to 8+ glasses today, avoid cold and exertion, "
+            "and take your medication as prescribed."
+        )
+    if data.pain_score >= 7:
+        return (
+            "High pain today. Take your prescribed pain relief, "
+            "rest, and keep warm. Contact your CHW if this continues."
+        )
+    if data.pain_score <= 2:
+        return (
+            "Pain is well controlled today — great. "
+            "Keep up your fluids and medication to maintain this."
+        )
+    return (
+        "Moderate pain today. Drink at least 8 glasses of water, "
+        "take your medication, and rest if possible."
+    )
+
+
+@app.post("/pain", response_model=PainDiaryResponse, tags=["pain"])
+async def log_pain_entry(
+    data: PainDiaryRequest,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Log a detailed pain diary entry.
+
+    Computes pain trend, detects breakthrough events and chest pain,
+    and returns a plain-English suggestion.
+    Chest pain or a breakthrough event auto-queues a CHW alert.
+    """
+    patient = await db.get(Patient, data.patient_id)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    cutoff = datetime.utcnow() - timedelta(days=7)
+    result = await db.execute(
+        select(PainDiaryEntry)
+        .where(
+            PainDiaryEntry.patient_id == data.patient_id,
+            PainDiaryEntry.recorded_at >= cutoff,
+        )
+        .order_by(PainDiaryEntry.recorded_at.asc())
+    )
+    recent_scores = [e.pain_score for e in result.scalars().all()]
+
+    locs = data.pain_locations or []
+    trend = compute_pain_trend(recent_scores, data.pain_score, locs)
+    suggestion = _pain_suggestion(trend, data)
+
+    entry = PainDiaryEntry(
+        patient_id=data.patient_id,
+        pain_score=data.pain_score,
+        pain_locations=",".join(locs) if locs else None,
+        trigger_cold=data.trigger_cold,
+        trigger_stress=data.trigger_stress,
+        trigger_exercise=data.trigger_exercise,
+        trigger_infection=data.trigger_infection,
+        trigger_dehydration=data.trigger_dehydration,
+        trigger_other=data.trigger_other,
+        took_paracetamol=data.took_paracetamol,
+        took_ibuprofen=data.took_ibuprofen,
+        took_opioid=data.took_opioid,
+        pain_relief_rating=data.pain_relief_rating,
+        is_breakthrough=trend.is_breakthrough,
+        notes=data.notes,
+    )
+    db.add(entry)
+    await db.flush()
+
+    if trend.is_chest_pain or trend.is_breakthrough:
+        alert_msg = (
+            "URGENT: Chest pain reported"
+            if trend.is_chest_pain
+            else f"Breakthrough pain event — score {data.pain_score}/10"
+        )
+        db.add(AlertLog(
+            patient_id=data.patient_id,
+            channel="sms",
+            message=alert_msg,
+            delivered=False,
+        ))
+
+    return PainDiaryResponse(
+        entry_id=entry.id,
+        patient_id=data.patient_id,
+        pain_score=data.pain_score,
+        pain_locations=locs or None,
+        is_breakthrough=trend.is_breakthrough,
+        chest_pain_alert=trend.is_chest_pain,
+        pain_slope_3d=trend.slope_3d,
+        suggestion=suggestion,
+        recorded_at=entry.recorded_at,
+    )
+
+
+@app.get("/patients/{patient_id}/pain", tags=["pain"])
+async def pain_history(
+    patient_id: str,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+    days: int = 30,
+):
+    """Return last N days of pain diary entries for a patient."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    result = await db.execute(
+        select(PainDiaryEntry)
+        .where(
+            PainDiaryEntry.patient_id == patient_id,
+            PainDiaryEntry.recorded_at >= cutoff,
+        )
+        .order_by(PainDiaryEntry.recorded_at.asc())
+    )
+    return [
+        {
+            "recorded_at": str(e.recorded_at)[:10],
+            "pain_score": e.pain_score,
+            "locations": e.pain_locations,
+            "is_breakthrough": e.is_breakthrough,
+        }
+        for e in result.scalars().all()
+    ]
