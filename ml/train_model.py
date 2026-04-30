@@ -228,8 +228,8 @@ def train() -> None:
         with open("ml/outputs/shap_importance.json", "w") as f:
             json.dump({k: round(float(v), 4) for k, v in importance}, f, indent=2)
         print("Saved: ml/outputs/shap_importance.json")
-    except ImportError:
-        print("shap not installed — skipping SHAP importance")
+    except Exception as e:
+        print(f"shap unavailable ({e.__class__.__name__}) — skipping SHAP importance")
 
     # Evaluation
     probs = calibrated.predict_proba(X_test)[:, 1]

@@ -36,8 +36,13 @@ if MODEL_PATH.exists():
 if LGB_PATH.exists():
     try:
         import lightgbm as lgb
-        import shap as shap_lib
         _lgb_model = lgb.Booster(model_file=str(LGB_PATH))
+    except Exception:
+        pass
+
+if _lgb_model is not None:
+    try:
+        import shap as shap_lib
         _explainer = shap_lib.TreeExplainer(_lgb_model)
     except Exception:
         pass
@@ -84,6 +89,8 @@ def predict(features: dict) -> PredictionResult:
 
     if _session:
         prob = float(_session.run(None, {_input_name: x})[1][0][1])
+    elif _lgb_model:
+        prob = float(_lgb_model.predict(x)[0])
     else:
         prob = _heuristic(features)
 
