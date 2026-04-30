@@ -5,17 +5,23 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 from alembic import context
+from logging.config import fileConfig
+from sqlalchemy.ext.asyncio import async_engine_from_config
+from alembic import context
+from backend.models import Base
+
 
 # Ensure project root is on sys.path so backend.* imports work
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from backend.models import Base  # noqa: E402 — registers all ORM models
 
 config = context.config
-
+config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
@@ -25,10 +31,8 @@ target_metadata = Base.metadata
 def _sync_url() -> str:
     """Return a synchronous DB URL for Alembic (strips async drivers)."""
     url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./warrior_blood_mvp.db")
-    return (
-        url
-        .replace("sqlite+aiosqlite", "sqlite")
-        .replace("postgresql+asyncpg", "postgresql+psycopg2")
+    return url.replace("sqlite+aiosqlite", "sqlite").replace(
+        "mysql+aiomysql", "mysql+pymysql"
     )
 
 

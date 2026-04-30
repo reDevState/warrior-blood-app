@@ -5,17 +5,18 @@
 
 services:
   db:
-    image: postgres:16
+    image: mysql:8.0
     environment:
-      POSTGRES_USER: warrior
-      POSTGRES_PASSWORD: blood
-      POSTGRES_DB: warriorblood
+      MYSQL_ROOT_PASSWORD: blood_root
+      MYSQL_DATABASE: warriorblood
+      MYSQL_USER: warrior
+      MYSQL_PASSWORD: blood
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U warrior -d warriorblood"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "warrior", "--password=blood"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -58,4 +59,4 @@ services:
     command: streamlit run dashboard/chw_dashboard.py --server.port 8501 --server.address 0.0.0.0
 
 volumes:
-  postgres_data:
+  mysql_data:
