@@ -22,7 +22,7 @@ from backend.ml_predictor import predict
 from backend.models import Patient, User
 
 # ---------------------------------------------------------------------------
-# Test database — SQLite in-memory (never use dev PostgreSQL for tests)
+# Test database — SQLite in-memory (never use dev MySQL container for tests)
 # ---------------------------------------------------------------------------
 
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"

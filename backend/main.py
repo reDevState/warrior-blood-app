@@ -89,8 +89,7 @@ app = FastAPI(
     version="0.1.0-mvp",
     description=(
         "SCD patient VOC risk prediction API. "
-        "MVP uses SQLite + rule-based ML. "
-        "Production: PostgreSQL + LightGBM ONNX."
+        "MVP uses MySQL + LightGBM ONNX predictor."
     ),
     lifespan=lifespan,
 )
