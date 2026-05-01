@@ -81,8 +81,9 @@ def generate_synthetic_data(n_patients: int = 80, n_days: int = 365) -> pd.DataF
             body_temp = float(np.random.normal(36.8 + (0.8 if fever else 0), 0.4))
 
             # VOC label: higher prob when pain high, dehydrated, fever, hot weather
-            voc_logit = (
-                -3.5
+            # Intercept -4.5 targets ~7% base VOC rate before derived feature boost
+            base_logit = (
+                -4.5
                 + (pain / 10) * 3.0
                 + (1.2 if fever else 0)
                 + ((urine - 3) / 5) * 1.5
@@ -91,7 +92,7 @@ def generate_synthetic_data(n_patients: int = 80, n_days: int = 365) -> pd.DataF
                 + ((ambient_temp - 28) / 10) * 0.8
                 + baseline_risk * 2.0
             )
-            voc_prob = 1 / (1 + np.exp(-voc_logit))
+            voc_prob = 1 / (1 + np.exp(-base_logit))
             voc_72h = int(np.random.random() < voc_prob)
 
             patient_rows.append({
@@ -107,6 +108,7 @@ def generate_synthetic_data(n_patients: int = 80, n_days: int = 365) -> pd.DataF
                 "ambient_temp_c": round(ambient_temp, 1),
                 "humidity_pct": round(min(max(humidity, 10), 100), 1),
                 "aqi": aqi,
+                "_base_logit": base_logit,
                 "voc_72h": voc_72h,
             })
 
@@ -147,6 +149,17 @@ def generate_synthetic_data(n_patients: int = 80, n_days: int = 365) -> pd.DataF
             past_voc = [j for j in range(i) if voc_labels[j] == 1]
             row["days_since_last_voc"] = float(i - past_voc[-1]) if past_voc else 365.0
 
+            # Recompute voc_72h with derived feature signal so model can learn from them
+            enhanced_logit = (
+                row["_base_logit"]
+                + float(np.clip(row["pain_slope_3d"], -2, 2)) * 0.5
+                + row["prior_voc_30d"] * 0.8
+                + (row["hydration_risk_score"] / 7) * 0.5
+                - (row["med_adherence_7d"] - 0.9) * 0.4
+            )
+            row["voc_72h"] = int(np.random.random() < 1 / (1 + np.exp(-enhanced_logit)))
+            del row["_base_logit"]
+
         rows.extend(patient_rows)
 
     df = pd.DataFrame(rows)
@@ -186,10 +199,12 @@ def train() -> None:
     print(f"Train VOC rate: {y_train.mean():.1%} | Test VOC rate: {y_test.mean():.1%}")
 
     # SMOTE — applied on training set ONLY after temporal split (Machado et al. 2024)
+    smote_applied = False
     try:
         from imblearn.over_sampling import SMOTE
         smote = SMOTE(random_state=SEED, k_neighbors=5)
         X_train_res, y_train_res = smote.fit_resample(X_train, y_train)
+        smote_applied = True
         print(
             f"After SMOTE — train samples: {len(X_train_res)}, "
             f"positive rate: {y_train_res.mean():.1%}"
@@ -198,12 +213,15 @@ def train() -> None:
         print("imbalanced-learn not installed — skipping SMOTE")
         X_train_res, y_train_res = X_train, y_train
 
+    # scale_pos_weight only when SMOTE has NOT already balanced the classes
+    pos_weight = 1 if smote_applied else int((1 - y_train.mean()) / max(y_train.mean(), 1e-9))
+
     # LightGBM training
     model = lgb.LGBMClassifier(
-        n_estimators=300,
+        n_estimators=400,
         learning_rate=0.05,
         num_leaves=31,
-        scale_pos_weight=int((1 - y_train.mean()) / max(y_train.mean(), 1e-9)),
+        scale_pos_weight=pos_weight,
         random_state=SEED,
         verbose=-1,
     )
@@ -216,8 +234,10 @@ def train() -> None:
     # SHAP feature importance on test set
     try:
         import shap as shap_lib
-        explainer = shap_lib.TreeExplainer(model.booster_)
-        shap_values = explainer.shap_values(X_test)
+        explainer = shap_lib.TreeExplainer(model)
+        sv = explainer.shap_values(X_test)
+        # Binary classification returns [neg_class, pos_class]; take positive class
+        shap_values = sv[1] if isinstance(sv, list) else sv
         mean_abs_shap = np.abs(shap_values).mean(axis=0)
         importance = sorted(
             zip(FEATURE_NAMES, mean_abs_shap.tolist()), key=lambda x: -x[1]
