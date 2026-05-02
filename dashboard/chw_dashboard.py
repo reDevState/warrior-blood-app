@@ -371,6 +371,7 @@ def register_page() -> None:
 
     with st.form("register"):
         name      = st.text_input("Full name")
+        email     = st.text_input("Email address", placeholder="patient@example.com")
         phone     = st.text_input("Phone number (optional)")
         dob       = st.date_input("Date of birth", value=None)
         diagnosis = st.selectbox(
@@ -385,6 +386,7 @@ def register_page() -> None:
             return
         resp = _api("post", "/patients", headers=_headers(), json={
             "name": name,
+            "email": email.strip() or None,
             "phone": phone or None,
             "dob": str(dob) if dob else None,
             "diagnosis_type": diagnosis,
@@ -392,13 +394,19 @@ def register_page() -> None:
         if resp and resp.status_code == 201:
             data = resp.json()
             pid  = data["id"]
-            st.success(f"Patient registered successfully.")
-            st.markdown(
-                f'<div class="info-card">📋 <strong>Patient ID:</strong> <code>{pid}</code><br>'
-                f"Give this ID to the patient — they will need it to link their account "
-                f"when logging in to the patient dashboard.</div>",
-                unsafe_allow_html=True,
-            )
+            st.success("Patient registered successfully.")
+            if email.strip():
+                st.markdown(
+                    f'<div class="info-card">✅ The patient can now log in to the patient dashboard '
+                    f'and enter their email address <strong>{email.strip()}</strong> to link their record.</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    f'<div class="info-card">📋 <strong>Patient ID:</strong> <code>{pid}</code><br>'
+                    f"No email registered — give the patient this ID to link their account.</div>",
+                    unsafe_allow_html=True,
+                )
         else:
             detail = resp.json().get("detail", "Unknown error") if resp else "No response"
             st.error(f"Registration failed: {detail}")
@@ -453,36 +461,63 @@ def patient_dashboard() -> None:
 
 
 def _patient_link_page() -> None:
-    """One-time setup: patient enters their UUID to link their clinical record."""
+    """One-time setup: patient links their record via email or Patient ID."""
     st.header("Link your patient record")
-    st.markdown(
-        "Your Community Health Worker will have given you a **Patient ID** when you were registered. "
-        "Enter it below to link your account."
-    )
 
-    with st.form("link_record"):
-        pid_input = st.text_input("Patient ID (UUID)", placeholder="e.g. a1b2c3d4-…")
-        submitted = st.form_submit_button("Link record", use_container_width=True)
+    tab_email, tab_id = st.tabs(["Link by email", "Link by Patient ID"])
 
-    if submitted:
-        pid_input = pid_input.strip()
-        if not pid_input:
-            st.error("Please enter your Patient ID.")
-            return
-        # Verify the ID exists
-        resp = _api("get", f"/patients/{pid_input}/history",
-                    headers=_headers(), params={"days": 1})
-        if resp and resp.status_code == 200:
-            st.session_state["patient_id"] = pid_input
-            st.success("Record linked successfully!")
-            st.rerun()
-        elif resp and resp.status_code == 404:
-            st.error("Patient ID not found. Check the ID with your health worker.")
-        else:
-            st.error("Could not verify Patient ID. Please try again.")
+    with tab_email:
+        st.markdown(
+            "Enter the **email address** your Community Health Worker registered for you."
+        )
+        with st.form("link_by_email"):
+            email_input = st.text_input("Email address", placeholder="patient@example.com")
+            submitted_email = st.form_submit_button("Find my record", use_container_width=True)
+
+        if submitted_email:
+            email_input = email_input.strip()
+            if not email_input:
+                st.error("Please enter your email address.")
+            else:
+                resp = _api("get", "/patients/lookup",
+                            headers=_headers(), params={"email": email_input})
+                if resp and resp.status_code == 200:
+                    pid = resp.json()["patient_id"]
+                    st.session_state["patient_id"] = pid
+                    st.success("Record linked successfully!")
+                    st.rerun()
+                elif resp and resp.status_code == 404:
+                    st.error("No record found for that email. Check with your health worker.")
+                else:
+                    st.error("Could not search records. Please try again.")
+
+    with tab_id:
+        st.markdown(
+            "If you don't have an email registered, enter the **Patient ID** "
+            "your Community Health Worker gave you."
+        )
+        with st.form("link_by_id"):
+            pid_input = st.text_input("Patient ID", placeholder="e.g. a1b2c3d4-…")
+            submitted_id = st.form_submit_button("Link record", use_container_width=True)
+
+        if submitted_id:
+            pid_input = pid_input.strip()
+            if not pid_input:
+                st.error("Please enter your Patient ID.")
+            else:
+                resp = _api("get", f"/patients/{pid_input}/history",
+                            headers=_headers(), params={"days": 1})
+                if resp and resp.status_code == 200:
+                    st.session_state["patient_id"] = pid_input
+                    st.success("Record linked successfully!")
+                    st.rerun()
+                elif resp and resp.status_code == 404:
+                    st.error("Patient ID not found. Check with your health worker.")
+                else:
+                    st.error("Could not verify Patient ID. Please try again.")
 
     st.divider()
-    st.caption("Don't have a Patient ID? Ask your Community Health Worker to register you.")
+    st.caption("Don't have a record? Ask your Community Health Worker to register you.")
 
 
 # ---------------------------------------------------------------------------
@@ -678,8 +713,25 @@ def _checkin_form(pid: str, key_prefix: str) -> None:
         med_taken     = r2c3.checkbox("Medication taken today", value=True,
                                       key=f"{key_prefix}_med_ci")
 
-        sleep_hours = st.slider("Sleep last night (hours)", 0.0, 12.0, 7.0, 0.5,
-                                key=f"{key_prefix}_sleep_ci")
+        st.markdown("**Sleep last night**")
+        sl1, sl2, sl3 = st.columns([2, 2, 1])
+        sleep_hour = sl1.selectbox(
+            "Hours", list(range(0, 13)), index=7,
+            key=f"{key_prefix}_sleep_h",
+        )
+        sleep_min = sl2.selectbox(
+            "Minutes", [0, 15, 30, 45],
+            format_func=lambda x: f"{x:02d}",
+            key=f"{key_prefix}_sleep_m",
+        )
+        sleep_ampm = sl3.radio(
+            "AM / PM", ["AM", "PM"], index=0,
+            key=f"{key_prefix}_sleep_ap",
+        )
+        # AM = under 12 h duration; PM = over 12 h (e.g. illness recovery)
+        sleep_hours = float(
+            sleep_hour + (12 if sleep_ampm == "PM" else 0) + sleep_min / 60
+        )
 
         st.subheader("Location (for weather data)")
         use_location = st.checkbox("Include location", value=True,

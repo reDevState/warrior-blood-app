@@ -186,6 +186,7 @@ async def register_patient(
     patient = Patient(
         name_enc=encrypt_phi(data.name),
         phone_enc=encrypt_phi(data.phone) if data.phone else None,
+        email_enc=encrypt_phi(data.email.strip().lower()) if data.email else None,
         dob=data.dob,
         diagnosis_type=data.diagnosis_type,
     )
@@ -194,6 +195,7 @@ async def register_patient(
     return PatientResponse(
         id=patient.id,
         name=data.name,
+        email=data.email,
         diagnosis_type=patient.diagnosis_type,
         enrolled_at=patient.enrolled_at,
     )
@@ -357,6 +359,30 @@ async def patient_checkin(
         weather_alerts=weather_alerts,
         created_at=entry.created_at,
     )
+
+
+# ---------------------------------------------------------------------------
+# Lookup by email (patient self-service — any valid token)
+# ---------------------------------------------------------------------------
+
+@app.get("/patients/lookup", tags=["patients"])
+async def lookup_patient_by_email(
+    email: str,
+    _: Annotated[dict, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    """Find a patient's ID by their registered email address."""
+    result = await db.execute(select(Patient))
+    patients = result.scalars().all()
+    needle = email.strip().lower()
+    for p in patients:
+        if p.email_enc:
+            try:
+                if decrypt_phi(p.email_enc) == needle:
+                    return {"patient_id": p.id}
+            except Exception:
+                continue
+    raise HTTPException(status_code=404, detail="No patient found with that email address")
 
 
 # ---------------------------------------------------------------------------

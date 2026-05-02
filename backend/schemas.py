@@ -30,6 +30,7 @@ class TokenResponse(BaseModel):
 class PatientCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     phone: Optional[str] = Field(None, max_length=20)
+    email: Optional[str] = Field(None, max_length=254)
     dob: Optional[date] = None
     diagnosis_type: Optional[str] = Field(None, max_length=64)
 
@@ -37,6 +38,7 @@ class PatientCreate(BaseModel):
 class PatientResponse(BaseModel):
     id: str
     name: Optional[str] = None
+    email: Optional[str] = None
     diagnosis_type: Optional[str]
     enrolled_at: datetime
     latest_risk_tier: Optional[str] = None

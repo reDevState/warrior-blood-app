@@ -29,6 +29,7 @@ class Patient(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     name_enc: Mapped[str] = mapped_column(Text, nullable=False)        # Fernet-encrypted
     phone_enc: Mapped[str] = mapped_column(Text, nullable=True)        # Fernet-encrypted
+    email_enc: Mapped[str | None] = mapped_column(Text, nullable=True) # Fernet-encrypted
     dob: Mapped[date | None] = mapped_column(Date, nullable=True)
     diagnosis_type: Mapped[str] = mapped_column(String(64), nullable=True)
     enrolled_at: Mapped[datetime] = mapped_column(
