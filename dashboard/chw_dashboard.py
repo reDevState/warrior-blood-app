@@ -575,8 +575,79 @@ def patient_history_page(pid: str) -> None:
 # SHARED FORM COMPONENTS  (used by both CHW and Patient dashboards)
 # ============================================================================
 
-_DEFAULT_LAT = 6.5244   # Lagos, Nigeria
-_DEFAULT_LON = 3.3792
+# City → (latitude, longitude).  Covers regions with highest SCD burden.
+_LOCATIONS: dict[str, tuple[float, float]] = {
+    # --- West Africa ---
+    "Abidjan, Côte d'Ivoire":       (5.3544,   -4.0017),
+    "Abuja, Nigeria":               (9.0765,    7.3986),
+    "Accra, Ghana":                 (5.6037,   -0.1870),
+    "Bamako, Mali":                 (12.6392,  -8.0029),
+    "Conakry, Guinea":              (9.6412,  -13.5784),
+    "Cotonou, Benin":               (6.3703,    2.3912),
+    "Dakar, Senegal":               (14.7167,  -17.4677),
+    "Freetown, Sierra Leone":       (8.4657,  -13.2317),
+    "Kano, Nigeria":                (12.0022,   8.5920),
+    "Kumasi, Ghana":                (6.6884,   -1.6244),
+    "Lagos, Nigeria":               (6.5244,    3.3792),
+    "Lomé, Togo":                   (6.1375,    1.2123),
+    "Monrovia, Liberia":            (6.2907,  -10.7605),
+    "Niamey, Niger":                (13.5137,   2.1098),
+    "Ouagadougou, Burkina Faso":    (12.3569,  -1.5353),
+    "Yamoussoukro, Côte d'Ivoire":  (6.8276,   -5.2893),
+    # --- Central Africa ---
+    "Brazzaville, Republic of Congo": (4.2634, 15.2429),
+    "Douala, Cameroon":             (4.0511,    9.7679),
+    "Kinshasa, DR Congo":           (-4.4419,  15.2663),
+    "Libreville, Gabon":            (0.3901,    9.4544),
+    "Luanda, Angola":               (-8.8368,  13.2343),
+    "Yaoundé, Cameroon":            (3.8480,   11.5021),
+    # --- East Africa ---
+    "Addis Ababa, Ethiopia":        (9.1450,   40.4897),
+    "Dar es Salaam, Tanzania":      (-6.7924,  39.2083),
+    "Kampala, Uganda":              (0.3476,   32.5825),
+    "Khartoum, Sudan":              (15.5007,  32.5599),
+    "Nairobi, Kenya":               (-1.2921,  36.8219),
+    # --- Southern Africa ---
+    "Blantyre, Malawi":             (-15.7861, 35.0058),
+    "Harare, Zimbabwe":             (-17.8252, 31.0335),
+    "Lusaka, Zambia":               (-15.4166, 28.2832),
+    "Maputo, Mozambique":           (-25.9692, 32.5732),
+    # --- United Kingdom ---
+    "Birmingham, UK":               (52.4862,  -1.8904),
+    "Bristol, UK":                  (51.4545,  -2.5879),
+    "Leeds, UK":                    (53.8008,  -1.5491),
+    "Leicester, UK":                (52.6369,  -1.1398),
+    "London, UK":                   (51.5074,  -0.1278),
+    "Manchester, UK":               (53.4808,  -2.2426),
+    "Nottingham, UK":               (52.9548,  -1.1581),
+    # --- United States ---
+    "Atlanta, USA":                 (33.7490,  -84.3880),
+    "Baltimore, USA":               (39.2904,  -76.6122),
+    "Chicago, USA":                 (41.8781,  -87.6298),
+    "Detroit, USA":                 (42.3314,  -83.0458),
+    "Houston, USA":                 (29.7604,  -95.3698),
+    "Los Angeles, USA":             (34.0522, -118.2437),
+    "Memphis, USA":                 (35.1495,  -90.0490),
+    "New York, USA":                (40.7128,  -74.0060),
+    "Philadelphia, USA":            (39.9526,  -75.1652),
+    "Washington DC, USA":           (38.9072,  -77.0369),
+    # --- Caribbean ---
+    "Bridgetown, Barbados":         (13.1132,  -59.5988),
+    "Kingston, Jamaica":            (17.9970,  -76.7936),
+    "Nassau, Bahamas":              (25.0480,  -77.3554),
+    "Port of Spain, Trinidad":      (10.6596,  -61.5086),
+    # --- South America ---
+    "Rio de Janeiro, Brazil":       (-22.9068, -43.1729),
+    "São Paulo, Brazil":            (-23.5505, -46.6333),
+    # --- Europe ---
+    "Amsterdam, Netherlands":       (52.3676,    4.9041),
+    "Brussels, Belgium":            (50.8503,    4.3517),
+    "Paris, France":                (48.8566,    2.3522),
+    # --- Custom ---
+    "Custom coordinates…":          (0.0, 0.0),
+}
+
+_DEFAULT_LOCATION = "Lagos, Nigeria"
 
 
 def _checkin_form(pid: str, key_prefix: str) -> None:
@@ -613,13 +684,24 @@ def _checkin_form(pid: str, key_prefix: str) -> None:
         st.subheader("Location (for weather data)")
         use_location = st.checkbox("Include location", value=True,
                                    key=f"{key_prefix}_useloc_ci")
-        lc1, lc2 = st.columns(2)
-        latitude  = lc1.number_input("Latitude",  -90.0,  90.0, _DEFAULT_LAT, 0.0001,
-                                     format="%.4f", key=f"{key_prefix}_lat_ci",
-                                     disabled=not use_location)
-        longitude = lc2.number_input("Longitude", -180.0, 180.0, _DEFAULT_LON, 0.0001,
-                                     format="%.4f", key=f"{key_prefix}_lon_ci",
-                                     disabled=not use_location)
+        city = st.selectbox(
+            "Search city",
+            options=list(_LOCATIONS.keys()),
+            index=list(_LOCATIONS.keys()).index(_DEFAULT_LOCATION),
+            key=f"{key_prefix}_city_ci",
+            disabled=not use_location,
+        )
+        if city == "Custom coordinates…" and use_location:
+            lc1, lc2 = st.columns(2)
+            latitude  = lc1.number_input("Latitude",  -90.0,  90.0, 0.0, 0.0001,
+                                         format="%.4f", key=f"{key_prefix}_lat_ci")
+            longitude = lc2.number_input("Longitude", -180.0, 180.0, 0.0, 0.0001,
+                                         format="%.4f", key=f"{key_prefix}_lon_ci")
+        else:
+            lat_lon   = _LOCATIONS.get(city, (0.0, 0.0))
+            latitude, longitude = lat_lon
+            if use_location:
+                st.caption(f"📍 {city}  ·  {latitude:.4f}, {longitude:.4f}")
 
         submitted = st.form_submit_button("Submit check-in", type="primary",
                                           use_container_width=True)
@@ -635,7 +717,10 @@ def _checkin_form(pid: str, key_prefix: str) -> None:
             "med_taken": med_taken,
             "sleep_hours": float(sleep_hours),
         }
-        if use_location:
+        if use_location and city != "Custom coordinates…":
+            payload["latitude"]  = round(float(latitude), 4)
+            payload["longitude"] = round(float(longitude), 4)
+        elif use_location and city == "Custom coordinates…":
             payload["latitude"]  = round(float(latitude), 4)
             payload["longitude"] = round(float(longitude), 4)
 
