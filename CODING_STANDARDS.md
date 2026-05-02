@@ -1,6 +1,5 @@
-# CLAUDE.md — Warrior Blood coding standards
+# Warrior Blood — coding standards
 
-Claude Code reads this file at the start of every session.
 Follow every rule here without being asked.
 
 ---
@@ -132,7 +131,6 @@ PostgreSQL (asyncpg), Alembic, Pydantic v2, Streamlit, pytest-asyncio.
 - Commit format: `type(scope): description` (e.g. `feat(pain): ...`, `fix(docker): ...`).
 - Tag format: `vX.Y.Z` with annotated message `vX.Y.Z — short description`.
 - Always push the tag separately: `git push origin vX.Y.Z`.
-- `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>` in every commit.
 
 ---
 
