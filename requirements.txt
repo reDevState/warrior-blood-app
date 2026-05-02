@@ -33,6 +33,7 @@ pytest-cov==5.0.0
 
 # Config
 python-dotenv==1.0.1
+setuptools==69.0.3
 
 alembic==1.13.1
 aiomysql==0.2.0

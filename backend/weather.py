@@ -18,7 +18,6 @@ from typing import Optional
 
 import requests
 
-OWM_KEY = os.getenv("OPENWEATHERMAP_API_KEY", "")
 CACHE_TTL = 6 * 3600  # 6 hours in seconds
 
 _cache: dict[str, tuple[float, dict]] = {}
@@ -55,7 +54,8 @@ def get_weather(lat: float, lon: float) -> WeatherData:
         WeatherData with temperature, humidity, AQI, and clinical risk flags.
         Returns an offline WeatherData if keys are absent or the call fails.
     """
-    if not OWM_KEY:
+    owm_key = os.getenv("OPENWEATHERMAP_API_KEY", "")
+    if not owm_key:
         return WeatherData(source="no_api_key")
 
     cache_key = f"{round(lat, 2)},{round(lon, 2)}"
@@ -69,7 +69,7 @@ def get_weather(lat: float, lon: float) -> WeatherData:
     try:
         resp = requests.get(
             "https://api.openweathermap.org/data/2.5/weather",
-            params={"lat": lat, "lon": lon, "appid": OWM_KEY, "units": "metric"},
+            params={"lat": lat, "lon": lon, "appid": owm_key, "units": "metric"},
             timeout=5,
         )
         resp.raise_for_status()
@@ -82,7 +82,7 @@ def get_weather(lat: float, lon: float) -> WeatherData:
         aqi, pm25 = None, None
         air = requests.get(
             "https://api.openweathermap.org/data/2.5/air_pollution",
-            params={"lat": lat, "lon": lon, "appid": OWM_KEY},
+            params={"lat": lat, "lon": lon, "appid": owm_key},
             timeout=5,
         )
         if air.ok:
