@@ -1,12 +1,12 @@
 """
-chw_dashboard.py — Warrior Blood Community Health Worker Triage Dashboard.
+chw_dashboard.py — Warrior Blood unified dashboard.
 
-Streamlit app connecting to the FastAPI backend. CHWs use this to:
-  - View all patients sorted by VOC risk tier (HIGH first)
-  - Log pain diary entries with trend detection
-  - Log hydration entries with daily progress tracking
-  - Submit check-ins with weather and environmental risk data
-  - Register patients and send manual SMS alerts
+Decodes the JWT role after login and routes to the correct view:
+  - CHW / admin → CHW triage dashboard
+  - patient      → Patient self-service dashboard
+
+Patient data logged through the patient dashboard is immediately visible
+in the CHW triage view — both share the same FastAPI backend.
 
 Run:
     streamlit run dashboard/chw_dashboard.py
@@ -14,6 +14,8 @@ Run:
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 from datetime import datetime
 
@@ -24,11 +26,11 @@ import streamlit as st
 API_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 # ---------------------------------------------------------------------------
-# Page config
+# Page config — must be first Streamlit call
 # ---------------------------------------------------------------------------
 
 st.set_page_config(
-    page_title="Warrior Blood — CHW Dashboard",
+    page_title="Warrior Blood",
     page_icon="🩸",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -37,24 +39,34 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    .risk-HIGH     { color: #A32D2D; font-weight: 600; }
-    .risk-MODERATE { color: #854F0B; font-weight: 600; }
-    .risk-LOW      { color: #3B6D11; font-weight: 600; }
-    .metric-card   { background: #f8f8f8; border-radius: 8px;
-                     padding: 12px 16px; margin-bottom: 8px; }
+    .risk-HIGH     { color: #A32D2D; font-weight: 700; }
+    .risk-MODERATE { color: #854F0B; font-weight: 700; }
+    .risk-LOW      { color: #3B6D11; font-weight: 700; }
     .alert-box     { background: #fff4e5; border-left: 4px solid #e07b00;
                      padding: 10px 14px; border-radius: 4px; margin: 6px 0; }
     .breakthrough  { background: #fff0f0; border-left: 4px solid #A32D2D;
-                     padding: 10px 14px; border-radius: 4px; }
+                     padding: 10px 14px; border-radius: 4px; margin: 6px 0; }
+    .info-card     { background: #f0f4ff; border-left: 4px solid #378ADD;
+                     padding: 10px 14px; border-radius: 4px; margin: 6px 0; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
+# ---------------------------------------------------------------------------
+# JWT / session helpers
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Session state helpers
-# ---------------------------------------------------------------------------
+def _decode_role(token: str) -> str:
+    """Extract role from JWT payload without signature verification."""
+    try:
+        payload_b64 = token.split(".")[1]
+        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+        payload = json.loads(base64.b64decode(payload_b64))
+        return payload.get("role", "patient")
+    except Exception:
+        return "patient"
+
 
 def _headers() -> dict:
     return {"Authorization": f"Bearer {st.session_state.get('token', '')}"}
@@ -70,11 +82,8 @@ def _api(method: str, path: str, **kwargs):
 
 
 def _patient_options() -> list[dict]:
-    """Fetch all patients and return list for selectbox."""
     resp = _api("get", "/patients", headers=_headers())
-    if resp and resp.status_code == 200:
-        return resp.json()
-    return []
+    return resp.json() if resp and resp.status_code == 200 else []
 
 
 def _patient_label(p: dict) -> str:
@@ -85,66 +94,77 @@ def _patient_label(p: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Login
+# Login page
 # ---------------------------------------------------------------------------
 
 def login_page() -> None:
-    st.title("Warrior Blood")
-    st.subheader("CHW Login")
+    col_left, col_mid, col_right = st.columns([1, 2, 1])
+    with col_mid:
+        st.markdown("## 🩸 Warrior Blood")
+        st.subheader("Sign in")
 
-    with st.form("login"):
-        username = st.text_input("Username", value="test_chw")
-        password = st.text_input("Password", type="password", value="chwpassword")
-        submitted = st.form_submit_button("Sign in")
+        with st.form("login"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Sign in", use_container_width=True)
 
-    if submitted:
-        resp = _api(
-            "post",
-            "/auth/token",
-            data={"username": username, "password": password},
-        )
-        if resp and resp.status_code == 200:
-            st.session_state["token"] = resp.json()["access_token"]
-            st.session_state["username"] = username
-            st.rerun()
-        else:
-            st.error("Login failed — check username and password.")
+        if submitted:
+            resp = _api("post", "/auth/token",
+                        data={"username": username, "password": password})
+            if resp and resp.status_code == 200:
+                token = resp.json()["access_token"]
+                st.session_state["token"]    = token
+                st.session_state["username"] = username
+                st.session_state["role"]     = _decode_role(token)
+                st.rerun()
+            else:
+                st.error("Login failed — check username and password.")
 
-    st.caption("MVP demo credentials: test_chw / chwpassword")
+        st.divider()
+        st.caption("**CHW demo:** test_chw / chwpassword")
+        st.caption("**Patient demo:** test_patient / testpassword")
 
 
 # ---------------------------------------------------------------------------
-# Main dashboard
+# Entry router
 # ---------------------------------------------------------------------------
 
-def dashboard() -> None:
+def main() -> None:
+    if "token" not in st.session_state:
+        login_page()
+        return
+
+    role = st.session_state.get("role", "patient")
+    if role in ("chw", "admin"):
+        chw_dashboard()
+    else:
+        patient_dashboard()
+
+
+# ============================================================================
+# CHW DASHBOARD
+# ============================================================================
+
+def chw_dashboard() -> None:
     with st.sidebar:
         st.markdown("### 🩸 Warrior Blood")
-        st.caption(f"Signed in as: **{st.session_state.get('username', '')}**")
+        st.caption("Community Health Worker")
+        st.caption(f"Signed in as **{st.session_state.get('username', '')}**")
         st.divider()
-        page = st.radio(
-            "View",
-            [
-                "Patient triage",
-                "Pain diary",
-                "Hydration diary",
-                "Weather & check-in",
-                "Register patient",
-                "About",
-            ],
-        )
-        if st.button("Sign out"):
+        page = st.radio("Navigation", [
+            "Patient triage",
+            "Log for patient",
+            "Register patient",
+            "About",
+        ])
+        if st.button("Sign out", use_container_width=True):
             st.session_state.clear()
             st.rerun()
 
     if page == "Patient triage":
-        triage_page()
-    elif page == "Pain diary":
-        pain_diary_page()
-    elif page == "Hydration diary":
-        hydration_diary_page()
-    elif page == "Weather & check-in":
-        weather_checkin_page()
+        chw_triage_page()
+    elif page == "Log for patient":
+        chw_log_page()
     elif page == "Register patient":
         register_page()
     else:
@@ -152,19 +172,17 @@ def dashboard() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Triage page
+# CHW — Triage
 # ---------------------------------------------------------------------------
 
-def triage_page() -> None:
+def chw_triage_page() -> None:
     st.header("Patient triage")
 
-    resp = _api("get", "/patients", headers=_headers())
-    if not resp or resp.status_code != 200:
-        st.warning("Could not load patient list.")
-        return
+    col_refresh, _ = st.columns([1, 5])
+    if col_refresh.button("🔄 Refresh"):
+        st.rerun()
 
-    patients: list[dict] = resp.json()
-
+    patients = _patient_options()
     if not patients:
         st.info("No patients registered yet. Use 'Register patient' to add one.")
         return
@@ -183,53 +201,108 @@ def triage_page() -> None:
     st.divider()
 
     for p in patients:
-        tier = p.get("latest_risk_tier") or "—"
-        tier_colour = {"HIGH": "🔴", "MODERATE": "🟡", "LOW": "🟢"}.get(tier, "⚪")
-        enrolled = p.get("enrolled_at", "")[:10]
-        display_name = p.get("name") or f"Patient {p['id'][:8]}..."
+        tier        = p.get("latest_risk_tier") or "—"
+        tier_icon   = {"HIGH": "🔴", "MODERATE": "🟡", "LOW": "🟢"}.get(tier, "⚪")
+        enrolled    = p.get("enrolled_at", "")[:10]
+        name        = p.get("name") or f"Patient {p['id'][:8]}…"
+        pid         = p["id"]
 
-        with st.expander(f"{tier_colour} {display_name}  |  {tier}  |  enrolled {enrolled}"):
-            col_left, col_right = st.columns([2, 1])
+        with st.expander(f"{tier_icon} {name}  ·  {tier}  ·  enrolled {enrolled}"):
+            tab_overview, tab_pain, tab_hydration, tab_alert = st.tabs([
+                "Overview", "Pain history", "Hydration", "Send alert"
+            ])
 
-            with col_left:
+            # --- Overview ---
+            with tab_overview:
                 st.markdown(f"**Diagnosis:** {p.get('diagnosis_type') or 'Not specified'}")
-                history_resp = _api(
-                    "get",
-                    f"/patients/{p['id']}/history",
-                    headers=_headers(),
-                    params={"days": 30},
-                )
+                st.caption(f"Patient ID: `{pid}`")
+                history_resp = _api("get", f"/patients/{pid}/history",
+                                    headers=_headers(), params={"days": 30})
                 if history_resp and history_resp.status_code == 200:
                     history = history_resp.json()
                     if history:
-                        timeline_chart(history)
+                        _timeline_chart(history)
                     else:
                         st.caption("No diary entries in the last 30 days.")
                 else:
                     st.caption("Could not load history.")
 
-            with col_right:
-                st.markdown("**Send alert**")
+            # --- Pain history ---
+            with tab_pain:
+                pain_resp = _api("get", f"/patients/{pid}/pain",
+                                 headers=_headers(), params={"days": 30})
+                if pain_resp and pain_resp.status_code == 200:
+                    entries = pain_resp.json()
+                    if entries:
+                        _pain_history_chart(entries)
+                        for e in reversed(entries[-5:]):
+                            ts     = e.get("recorded_at", "")[:16].replace("T", " ")
+                            score  = e.get("pain_score", 0)
+                            locs   = ", ".join(
+                                _LOCATION_LABELS.get(l, l)
+                                for l in (e.get("pain_locations") or [])
+                            )
+                            flags  = []
+                            if e.get("is_breakthrough"):
+                                flags.append("⭐ Breakthrough")
+                            if e.get("chest_pain_alert"):
+                                flags.append("🚨 Chest pain")
+                            st.markdown(
+                                f"`{ts}` — Score **{score}/10**"
+                                + (f" · {locs}" if locs else "")
+                                + (f" · {' · '.join(flags)}" if flags else "")
+                            )
+                    else:
+                        st.caption("No pain entries in the last 30 days.")
+                else:
+                    st.caption("Could not load pain history.")
+
+            # --- Hydration ---
+            with tab_hydration:
+                diary_resp = _api("get", f"/patients/{pid}/history",
+                                  headers=_headers(), params={"days": 7})
+                if diary_resp and diary_resp.status_code == 200:
+                    entries = diary_resp.json()
+                    if entries:
+                        recent = entries[-1]
+                        status = recent.get("hydration_status") or "—"
+                        icon   = "✅" if status == "WELL_HYDRATED" else "⚠️"
+                        st.markdown(f"**Latest hydration status:** {icon} {status.replace('_', ' ').title()}")
+                        fluids = [e.get("fluid_intake_glasses", 0) for e in entries]
+                        dates  = [e.get("entry_date", "") for e in entries]
+                        fig = go.Figure(go.Bar(
+                            x=dates, y=fluids,
+                            marker_color=["#3B6D11" if g >= 8 else "#854F0B" if g >= 5 else "#A32D2D" for g in fluids],
+                            name="Glasses/day",
+                        ))
+                        fig.add_hline(y=8, line_dash="dash", line_color="green",
+                                      annotation_text="Target (8 glasses)")
+                        fig.update_layout(
+                            height=180, margin=dict(l=0, r=0, t=10, b=0),
+                            yaxis=dict(title="Glasses"), plot_bgcolor="white",
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.caption("No diary data for the last 7 days.")
+
+            # --- Alert ---
+            with tab_alert:
                 msg = st.text_area(
                     "Message",
                     value=f"Please check in — your risk level is {tier}.",
-                    key=f"msg_{p['id']}",
+                    key=f"msg_{pid}",
                     height=80,
                 )
-                if st.button("Send SMS", key=f"sms_{p['id']}"):
-                    alert_resp = _api(
-                        "post",
-                        "/alerts",
-                        headers=_headers(),
-                        json={"patient_id": p["id"], "message": msg, "channel": "sms"},
-                    )
+                if st.button("Send SMS", key=f"sms_{pid}"):
+                    alert_resp = _api("post", "/alerts", headers=_headers(),
+                                      json={"patient_id": pid, "message": msg, "channel": "sms"})
                     if alert_resp and alert_resp.status_code == 200:
                         st.success("Alert queued.")
                     else:
                         st.error("Alert failed.")
 
 
-def timeline_chart(history: list[dict]) -> None:
+def _timeline_chart(history: list[dict]) -> None:
     dates      = [h["entry_date"] for h in history]
     pain       = [h["pain_score"] for h in history]
     risk_score = [h.get("risk_score") or 0 for h in history]
@@ -247,11 +320,11 @@ def timeline_chart(history: list[dict]) -> None:
         if h.get("risk_tier") == "HIGH":
             fig.add_vrect(
                 x0=dates[i], x1=dates[i],
-                fillcolor="rgba(163,45,45,0.15)", line_width=0,
+                fillcolor="rgba(163,45,45,0.12)", line_width=0,
             )
     fig.update_layout(
-        height=200, margin=dict(l=0, r=0, t=20, b=0), showlegend=True,
-        legend=dict(orientation="h", y=1.15),
+        height=200, margin=dict(l=0, r=0, t=20, b=0),
+        showlegend=True, legend=dict(orientation="h", y=1.15),
         yaxis=dict(title="Pain (0-10)", range=[0, 10], side="left"),
         yaxis2=dict(title="Risk (0-1)", range=[0, 1], side="right", overlaying="y"),
         xaxis=dict(title=""), plot_bgcolor="white",
@@ -260,432 +333,300 @@ def timeline_chart(history: list[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Pain diary page
+# CHW — Log for patient (manual data entry on behalf)
 # ---------------------------------------------------------------------------
 
-_PAIN_LOCATIONS = ["CHEST", "BACK", "ABDOMEN", "L_ARM", "R_ARM", "L_LEG", "R_LEG", "HEAD", "OTHER"]
-_LOCATION_LABELS = {
-    "CHEST": "Chest", "BACK": "Back", "ABDOMEN": "Abdomen",
-    "L_ARM": "Left arm", "R_ARM": "Right arm",
-    "L_LEG": "Left leg", "R_LEG": "Right leg",
-    "HEAD": "Head", "OTHER": "Other",
-}
+def chw_log_page() -> None:
+    st.header("Log for patient")
+    st.caption("Use this to record check-in, pain or hydration data on behalf of a patient.")
+
+    patients = _patient_options()
+    if not patients:
+        st.warning("No patients registered yet.")
+        return
+
+    patient_map = {_patient_label(p): p for p in patients}
+    selected    = st.selectbox("Select patient", list(patient_map.keys()))
+    patient     = patient_map[selected]
+    pid         = patient["id"]
+
+    tab_ci, tab_pain, tab_hydration = st.tabs(["Check-in & Weather", "Pain diary", "Hydration diary"])
+
+    with tab_ci:
+        _checkin_form(pid, key_prefix="chw")
+
+    with tab_pain:
+        _pain_log_form(pid, key_prefix="chw")
+
+    with tab_hydration:
+        _hydration_log_form(pid, key_prefix="chw")
 
 
-def pain_diary_page() -> None:
+# ---------------------------------------------------------------------------
+# CHW — Register patient
+# ---------------------------------------------------------------------------
+
+def register_page() -> None:
+    st.header("Register new patient")
+
+    with st.form("register"):
+        name      = st.text_input("Full name")
+        phone     = st.text_input("Phone number (optional)")
+        dob       = st.date_input("Date of birth", value=None)
+        diagnosis = st.selectbox(
+            "Diagnosis type",
+            ["HbSS", "HbSC", "HbS/beta-thalassaemia", "Other"],
+        )
+        submitted = st.form_submit_button("Register patient", use_container_width=True)
+
+    if submitted:
+        if not name:
+            st.error("Name is required.")
+            return
+        resp = _api("post", "/patients", headers=_headers(), json={
+            "name": name,
+            "phone": phone or None,
+            "dob": str(dob) if dob else None,
+            "diagnosis_type": diagnosis,
+        })
+        if resp and resp.status_code == 201:
+            data = resp.json()
+            pid  = data["id"]
+            st.success(f"Patient registered successfully.")
+            st.markdown(
+                f'<div class="info-card">📋 <strong>Patient ID:</strong> <code>{pid}</code><br>'
+                f"Give this ID to the patient — they will need it to link their account "
+                f"when logging in to the patient dashboard.</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            detail = resp.json().get("detail", "Unknown error") if resp else "No response"
+            st.error(f"Registration failed: {detail}")
+
+
+# ============================================================================
+# PATIENT DASHBOARD
+# ============================================================================
+
+def patient_dashboard() -> None:
+    with st.sidebar:
+        st.markdown("### 🩸 Warrior Blood")
+        st.caption("Patient Portal")
+        st.caption(f"Signed in as **{st.session_state.get('username', '')}**")
+
+        pid = st.session_state.get("patient_id")
+        if pid:
+            st.caption(f"Patient ID: `{pid[:8]}…`")
+            if st.button("Change record", use_container_width=True):
+                del st.session_state["patient_id"]
+                st.rerun()
+
+        st.divider()
+        page = st.radio("Navigation", [
+            "Check-in & Weather",
+            "Pain diary",
+            "Hydration diary",
+            "My history",
+            "About",
+        ])
+        if st.button("Sign out", use_container_width=True):
+            st.session_state.clear()
+            st.rerun()
+
+    # Patient must link their record before using the app
+    if "patient_id" not in st.session_state:
+        _patient_link_page()
+        return
+
+    pid = st.session_state["patient_id"]
+
+    if page == "Check-in & Weather":
+        patient_checkin_page(pid)
+    elif page == "Pain diary":
+        patient_pain_page(pid)
+    elif page == "Hydration diary":
+        patient_hydration_page(pid)
+    elif page == "My history":
+        patient_history_page(pid)
+    else:
+        about_page()
+
+
+def _patient_link_page() -> None:
+    """One-time setup: patient enters their UUID to link their clinical record."""
+    st.header("Link your patient record")
+    st.markdown(
+        "Your Community Health Worker will have given you a **Patient ID** when you were registered. "
+        "Enter it below to link your account."
+    )
+
+    with st.form("link_record"):
+        pid_input = st.text_input("Patient ID (UUID)", placeholder="e.g. a1b2c3d4-…")
+        submitted = st.form_submit_button("Link record", use_container_width=True)
+
+    if submitted:
+        pid_input = pid_input.strip()
+        if not pid_input:
+            st.error("Please enter your Patient ID.")
+            return
+        # Verify the ID exists
+        resp = _api("get", f"/patients/{pid_input}/history",
+                    headers=_headers(), params={"days": 1})
+        if resp and resp.status_code == 200:
+            st.session_state["patient_id"] = pid_input
+            st.success("Record linked successfully!")
+            st.rerun()
+        elif resp and resp.status_code == 404:
+            st.error("Patient ID not found. Check the ID with your health worker.")
+        else:
+            st.error("Could not verify Patient ID. Please try again.")
+
+    st.divider()
+    st.caption("Don't have a Patient ID? Ask your Community Health Worker to register you.")
+
+
+# ---------------------------------------------------------------------------
+# Patient — Check-in & Weather
+# ---------------------------------------------------------------------------
+
+def patient_checkin_page(pid: str) -> None:
+    st.header("Daily check-in")
+    st.caption(
+        "Log your daily symptoms. Your location enables weather-based VOC risk alerts "
+        "(Nolan et al. 2008)."
+    )
+    _checkin_form(pid, key_prefix="pat")
+
+
+# ---------------------------------------------------------------------------
+# Patient — Pain diary
+# ---------------------------------------------------------------------------
+
+def patient_pain_page(pid: str) -> None:
     st.header("Pain diary")
 
-    patients = _patient_options()
-    if not patients:
-        st.warning("No patients found. Register a patient first.")
-        return
+    tab_log, tab_history = st.tabs(["Log pain", "My pain history"])
 
-    patient_map = {_patient_label(p): p for p in patients}
-    selected_label = st.selectbox("Select patient", list(patient_map.keys()))
-    patient = patient_map[selected_label]
-    patient_id = patient["id"]
-
-    tab_log, tab_history = st.tabs(["Log entry", "Pain history"])
-
-    # --- Log entry ---
     with tab_log:
-        with st.form("pain_entry"):
-            st.subheader("New pain entry")
+        _pain_log_form(pid, key_prefix="pat")
 
-            pain_score = st.slider("Pain score (0 = none, 10 = worst imaginable)", 0, 10, 0)
-
-            col1, col2 = st.columns(2)
-            with col1:
-                selected_locations = st.multiselect(
-                    "Pain locations",
-                    options=_PAIN_LOCATIONS,
-                    format_func=lambda x: _LOCATION_LABELS[x],
-                )
-
-            with col2:
-                st.markdown("**Triggers**")
-                trigger_cold        = st.checkbox("Cold exposure")
-                trigger_stress      = st.checkbox("Stress")
-                trigger_exercise    = st.checkbox("Exercise")
-                trigger_infection   = st.checkbox("Infection / illness")
-                trigger_dehydration = st.checkbox("Dehydration")
-                trigger_other = st.text_input("Other trigger (describe)")
-
-            st.markdown("**Medication taken**")
-            mc1, mc2, mc3 = st.columns(3)
-            took_paracetamol = mc1.checkbox("Paracetamol")
-            took_ibuprofen   = mc2.checkbox("Ibuprofen")
-            took_opioid      = mc3.checkbox("Opioid")
-
-            pain_relief_rating = st.select_slider(
-                "Pain relief effectiveness",
-                options=[0, 1, 2, 3],
-                format_func=lambda x: ["None taken / no effect", "Mild", "Moderate", "Good"][x],
-                value=0,
-            )
-
-            notes = st.text_area("Notes (optional)", height=80)
-
-            submitted = st.form_submit_button("Log pain entry", type="primary")
-
-        if submitted:
-            payload = {
-                "patient_id": patient_id,
-                "pain_score": pain_score,
-                "pain_locations": selected_locations or None,
-                "trigger_cold": trigger_cold,
-                "trigger_stress": trigger_stress,
-                "trigger_exercise": trigger_exercise,
-                "trigger_infection": trigger_infection,
-                "trigger_dehydration": trigger_dehydration,
-                "trigger_other": trigger_other or None,
-                "took_paracetamol": took_paracetamol,
-                "took_ibuprofen": took_ibuprofen,
-                "took_opioid": took_opioid,
-                "pain_relief_rating": pain_relief_rating if (took_paracetamol or took_ibuprofen or took_opioid) else None,
-                "notes": notes or None,
-            }
-            resp = _api("post", "/pain", headers=_headers(), json=payload)
-            if resp and resp.status_code == 200:
-                data = resp.json()
-                _show_pain_result(data)
-            else:
-                detail = resp.json().get("detail", "Unknown error") if resp else "No response"
-                st.error(f"Failed to log pain entry: {detail}")
-
-    # --- History ---
     with tab_history:
-        _show_pain_history(patient_id)
-
-
-def _show_pain_result(data: dict) -> None:
-    if data.get("chest_pain_alert"):
-        st.markdown(
-            '<div class="breakthrough">🚨 <strong>Chest pain detected — CHW alert has been queued.</strong></div>',
-            unsafe_allow_html=True,
-        )
-    elif data.get("is_breakthrough"):
-        st.markdown(
-            '<div class="breakthrough">⚠️ <strong>Breakthrough pain event detected — CHW alert queued.</strong></div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.success(f"Pain entry logged (score: {data['pain_score']}/10)")
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Pain score", f"{data['pain_score']}/10")
-
-    slope = data.get("pain_slope_3d")
-    if slope is not None:
-        trend_label = "Rising ▲" if slope > 0.3 else ("Falling ▼" if slope < -0.3 else "Stable →")
-        col2.metric("3-day trend", trend_label, delta=f"{slope:+.1f}/day")
-    else:
-        col2.metric("3-day trend", "Insufficient data")
-
-    locs = data.get("pain_locations") or []
-    col3.metric("Locations", ", ".join(_LOCATION_LABELS.get(l, l) for l in locs) or "—")
-
-    if data.get("suggestion"):
-        st.info(f"💬 {data['suggestion']}")
-
-
-def _show_pain_history(patient_id: str) -> None:
-    days = st.slider("Days of history", 7, 90, 30, key="pain_hist_days")
-    resp = _api("get", f"/patients/{patient_id}/pain", headers=_headers(), params={"days": days})
-
-    if not resp or resp.status_code != 200:
-        st.warning("Could not load pain history.")
-        return
-
-    entries: list[dict] = resp.json()
-    if not entries:
-        st.info("No pain diary entries in this period.")
-        return
-
-    st.caption(f"{len(entries)} entries in the last {days} days")
-
-    dates  = [e.get("recorded_at", "")[:10] for e in entries]
-    scores = [e.get("pain_score", 0) for e in entries]
-    breaks = [e.get("is_breakthrough", False) for e in entries]
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=dates, y=scores, name="Pain score",
-        mode="lines+markers",
-        line=dict(color="#A32D2D", width=2),
-        marker=dict(
-            size=[12 if b else 7 for b in breaks],
-            color=["#A32D2D" if b else "#E07070" for b in breaks],
-            symbol=["star" if b else "circle" for b in breaks],
-        ),
-    ))
-    fig.add_hline(y=7, line_dash="dash", line_color="orange",
-                  annotation_text="Breakthrough threshold (7)")
-    fig.update_layout(
-        height=280, margin=dict(l=0, r=0, t=30, b=0),
-        yaxis=dict(title="Pain score", range=[0, 10]),
-        xaxis=dict(title=""),
-        plot_bgcolor="white",
-        title="Pain score history — ⭐ = breakthrough event",
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    with st.expander("View raw entries"):
-        for e in reversed(entries):
-            ts = e.get("recorded_at", "")[:16].replace("T", " ")
-            score = e.get("pain_score", 0)
-            locs = ", ".join(_LOCATION_LABELS.get(l, l) for l in (e.get("pain_locations") or []))
-            flag = "⭐ Breakthrough" if e.get("is_breakthrough") else ""
-            chest = "🚨 Chest pain" if e.get("chest_pain_alert") else ""
-            st.markdown(f"**{ts}** — Score {score}/10 {locs and f'| {locs}'} {flag} {chest}")
+        _show_pain_history(pid)
 
 
 # ---------------------------------------------------------------------------
-# Hydration diary page
+# Patient — Hydration diary
 # ---------------------------------------------------------------------------
 
-_DRINK_TYPES = ["WATER", "JUICE", "MILK", "TEA", "COFFEE", "SODA", "OTHER"]
-_DRINK_LABELS = {
-    "WATER": "💧 Water", "JUICE": "🥤 Juice", "MILK": "🥛 Milk",
-    "TEA": "🍵 Tea", "COFFEE": "☕ Coffee", "SODA": "🥤 Soda", "OTHER": "Other",
-}
-_HYDRATION_COLOURS = {
-    "WELL_HYDRATED": "#3B6D11",
-    "MILD_RISK": "#854F0B",
-    "MODERATE_RISK": "#854F0B",
-    "SEVERE_RISK": "#A32D2D",
-    "CRITICAL": "#A32D2D",
-}
-_WHO_TARGET_ML = 2000  # WHO oral rehydration target (Yallop et al. 2007)
-
-
-def hydration_diary_page() -> None:
+def patient_hydration_page(pid: str) -> None:
     st.header("Hydration diary")
 
-    patients = _patient_options()
-    if not patients:
-        st.warning("No patients found. Register a patient first.")
-        return
-
-    patient_map = {_patient_label(p): p for p in patients}
-    selected_label = st.selectbox("Select patient", list(patient_map.keys()), key="hydration_patient")
-    patient_id = patient_map[selected_label]["id"]
-
-    tab_log, tab_guide = st.tabs(["Log drink", "Hydration guide"])
+    tab_log, tab_guide = st.tabs(["Log a drink", "Hydration guide"])
 
     with tab_log:
-        with st.form("hydration_entry"):
-            st.subheader("Log a drink")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                drink_type = st.selectbox(
-                    "Drink type",
-                    _DRINK_TYPES,
-                    format_func=lambda x: _DRINK_LABELS[x],
-                )
-                drink_volume_ml = st.number_input(
-                    "Volume (ml)", min_value=50, max_value=2000, value=250, step=50,
-                )
-                if drink_type in ("TEA", "COFFEE"):
-                    st.caption("⚠️ Tea/coffee stored at 80% effective volume due to mild diuretic effect.")
-
-            with col2:
-                urine_colour = st.select_slider(
-                    "Urine colour (Armstrong scale)",
-                    options=list(range(1, 9)),
-                    format_func=lambda x: {
-                        1: "1 — Pale straw", 2: "2 — Straw", 3: "3 — Yellow",
-                        4: "4 — Dark yellow", 5: "5 — Amber", 6: "6 — Dark amber",
-                        7: "7 — Honey", 8: "8 — Brown",
-                    }[x],
-                    value=3,
-                )
-                thirst_level = st.select_slider(
-                    "Thirst level",
-                    options=[1, 2, 3, 4],
-                    format_func=lambda x: ["1 — Not thirsty", "2 — Slightly", "3 — Moderately", "4 — Very thirsty"][x - 1],
-                    value=1,
-                )
-
-            st.markdown("**Symptoms**")
-            sc1, sc2, sc3 = st.columns(3)
-            dry_mouth  = sc1.checkbox("Dry mouth")
-            dizziness  = sc2.checkbox("Dizziness")
-            headache   = sc3.checkbox("Headache")
-
-            submitted = st.form_submit_button("Log drink", type="primary")
-
-        if submitted:
-            payload = {
-                "patient_id": patient_id,
-                "drink_type": drink_type,
-                "drink_volume_ml": int(drink_volume_ml),
-                "urine_colour": urine_colour,
-                "thirst_level": thirst_level,
-                "dry_mouth": dry_mouth,
-                "dizziness": dizziness,
-                "headache": headache,
-            }
-            resp = _api("post", "/hydration", headers=_headers(), json=payload)
-            if resp and resp.status_code == 200:
-                _show_hydration_result(resp.json())
-            else:
-                detail = resp.json().get("detail", "Unknown error") if resp else "No response"
-                st.error(f"Failed to log drink: {detail}")
+        _hydration_log_form(pid, key_prefix="pat")
 
     with tab_guide:
-        _show_hydration_guide()
-
-
-def _show_hydration_result(data: dict) -> None:
-    status = data.get("hydration_status", "")
-    colour = _HYDRATION_COLOURS.get(status, "#378ADD")
-
-    daily_ml  = data.get("daily_total_ml", 0)
-    daily_gl  = data.get("daily_total_glasses", 0.0)
-    pct       = min(daily_ml / _WHO_TARGET_ML * 100, 100)
-
-    st.success(f"Drink logged: {_DRINK_LABELS.get(data['drink_type'], data['drink_type'])} — {data['drink_volume_ml']} ml")
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Daily total", f"{daily_ml} ml", f"{daily_gl:.1f} glasses")
-    col2.metric("WHO target", f"{_WHO_TARGET_ML} ml", f"{pct:.0f}% reached")
-    col3.metric("Status", status.replace("_", " ").title())
-
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=daily_ml,
-        number={"suffix": " ml"},
-        gauge={
-            "axis": {"range": [0, 3000]},
-            "bar": {"color": colour},
-            "steps": [
-                {"range": [0, 1000],  "color": "#fdd"},
-                {"range": [1000, 1500], "color": "#ffd"},
-                {"range": [1500, 2000], "color": "#dfd"},
-                {"range": [2000, 3000], "color": "#cfc"},
-            ],
-            "threshold": {
-                "line": {"color": "green", "width": 3},
-                "thickness": 0.75,
-                "value": _WHO_TARGET_ML,
-            },
-        },
-        title={"text": "Daily fluid intake"},
-    ))
-    fig.update_layout(height=250, margin=dict(l=20, r=20, t=40, b=0))
-    st.plotly_chart(fig, use_container_width=True)
-
-    if data.get("hydration_message"):
-        icon = "✅" if status == "WELL_HYDRATED" else "⚠️"
-        st.markdown(
-            f'<div class="alert-box">{icon} <strong>{data["hydration_message"]}</strong></div>',
-            unsafe_allow_html=True,
-        )
-    if data.get("hydration_advice"):
-        st.info(f"📋 {data['hydration_advice']}")
-    if data.get("suggestion"):
-        st.caption(f"💬 {data['suggestion']}")
-
-
-def _show_hydration_guide() -> None:
-    st.subheader("Hydration targets for SCD patients")
-    st.markdown("""
-**WHO oral rehydration guidelines** (Yallop et al. 2007) recommend **≥ 2 000 ml/day**
-for SCD patients. Dehydration increases VOC risk (OR ≈ 2.1).
-
-| Urine colour | Meaning | Action |
-|---|---|---|
-| 1–2 (pale straw) | Well hydrated ✅ | Maintain intake |
-| 3–4 (yellow) | Adequate | Drink more water |
-| 5–6 (amber) | Mild dehydration ⚠️ | 250 ml water now |
-| 7–8 (dark/brown) | Severe dehydration 🚨 | Seek medical attention |
-
-**Diuretic note:** Tea and coffee are stored at 80% effective volume due to
-mild diuretic effect. Encourage water as primary fluid.
-    """)
-
-    urine_colours = list(range(1, 9))
-    colours_hex   = ["#FFF8DC", "#F5DEB3", "#FFD700", "#DAA520",
-                     "#CD853F", "#8B6914", "#8B4513", "#4B2F1A"]
-
-    fig = go.Figure(go.Bar(
-        x=[f"Colour {i}" for i in urine_colours],
-        y=[1] * 8,
-        marker_color=colours_hex,
-        text=["Pale straw", "Straw", "Yellow", "Dark yellow",
-              "Amber", "Dark amber", "Honey", "Brown"],
-        textposition="inside",
-        hovertemplate="%{text}<extra></extra>",
-    ))
-    fig.update_layout(
-        height=120, margin=dict(l=0, r=0, t=20, b=30),
-        showlegend=False, yaxis=dict(visible=False),
-        title="Armstrong (1994) urine colour chart",
-    )
-    st.plotly_chart(fig, use_container_width=True)
+        _hydration_guide()
 
 
 # ---------------------------------------------------------------------------
-# Weather & check-in page
+# Patient — My history
 # ---------------------------------------------------------------------------
 
-_RISK_COLOURS = {"HIGH": "#A32D2D", "MODERATE": "#854F0B", "LOW": "#3B6D11"}
+def patient_history_page(pid: str) -> None:
+    st.header("My health history")
 
-# Lagos, Nigeria as default (central SCD-prevalent region)
-_DEFAULT_LAT = 6.5244
+    days = st.slider("Days to show", 7, 90, 30)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("Diary entries")
+        resp = _api("get", f"/patients/{pid}/history",
+                    headers=_headers(), params={"days": days})
+        if resp and resp.status_code == 200:
+            history = resp.json()
+            if history:
+                _timeline_chart(history)
+                st.caption(f"{len(history)} entries in the last {days} days")
+            else:
+                st.info("No diary entries yet.")
+        else:
+            st.warning("Could not load diary history.")
+
+    with col2:
+        st.subheader("Pain entries")
+        resp = _api("get", f"/patients/{pid}/pain",
+                    headers=_headers(), params={"days": days})
+        if resp and resp.status_code == 200:
+            pain_entries = resp.json()
+            if pain_entries:
+                _pain_history_chart(pain_entries)
+                breaks = sum(1 for e in pain_entries if e.get("is_breakthrough"))
+                st.caption(f"{len(pain_entries)} entries · {breaks} breakthrough events")
+            else:
+                st.info("No pain entries yet.")
+        else:
+            st.warning("Could not load pain history.")
+
+
+# ============================================================================
+# SHARED FORM COMPONENTS  (used by both CHW and Patient dashboards)
+# ============================================================================
+
+_DEFAULT_LAT = 6.5244   # Lagos, Nigeria
 _DEFAULT_LON = 3.3792
 
 
-def weather_checkin_page() -> None:
-    st.header("Weather & check-in")
-    st.caption(
-        "Submit a full symptom check-in with GPS coordinates. "
-        "Weather and air quality data are retrieved automatically and used in VOC risk scoring "
-        "(Nolan et al. 2008; Yallop et al. 2007)."
-    )
+def _checkin_form(pid: str, key_prefix: str) -> None:
+    """Full check-in form with weather, shared between CHW and Patient views."""
+    with st.form(f"{key_prefix}_checkin_form"):
+        st.subheader("Symptoms")
 
-    patients = _patient_options()
-    if not patients:
-        st.warning("No patients found. Register a patient first.")
-        return
-
-    patient_map = {_patient_label(p): p for p in patients}
-    selected_label = st.selectbox("Select patient", list(patient_map.keys()), key="weather_patient")
-    patient_id = patient_map[selected_label]["id"]
-
-    with st.form("weather_checkin"):
-        st.subheader("Patient symptoms")
-
-        sc1, sc2, sc3 = st.columns(3)
-        pain_score          = sc1.slider("Pain score", 0, 10, 0)
-        fluid_intake_glasses = sc2.number_input("Fluid intake (glasses)", min_value=0, max_value=30, value=6)
-        urine_colour        = sc3.select_slider(
-            "Urine colour", options=list(range(1, 9)),
-            format_func=lambda x: f"{x} — " + ["Pale straw","Straw","Yellow","Dark yellow","Amber","Dark amber","Honey","Brown"][x-1],
+        r1c1, r1c2, r1c3 = st.columns(3)
+        pain_score           = r1c1.slider("Pain score (0–10)", 0, 10, 0,
+                                           key=f"{key_prefix}_pain_ci")
+        fluid_intake_glasses = r1c2.number_input("Fluid intake (glasses)", 0, 30, 6,
+                                                  key=f"{key_prefix}_fluid_ci")
+        urine_colour         = r1c3.select_slider(
+            "Urine colour",
+            options=list(range(1, 9)),
+            format_func=lambda x: f"{x} — " + [
+                "Pale straw", "Straw", "Yellow", "Dark yellow",
+                "Amber", "Dark amber", "Honey", "Brown"
+            ][x - 1],
             value=3,
+            key=f"{key_prefix}_urine_ci",
         )
 
-        sc4, sc5, sc6 = st.columns(3)
-        body_temp_c = sc4.number_input("Body temp (°C)", min_value=35.0, max_value=43.0, value=36.8, step=0.1)
-        fever_present = sc5.checkbox("Fever present")
-        med_taken = sc6.checkbox("Medication taken today", value=True)
+        r2c1, r2c2, r2c3 = st.columns(3)
+        body_temp_c   = r2c1.number_input("Body temp (°C)", 35.0, 43.0, 36.8, 0.1,
+                                           key=f"{key_prefix}_temp_ci")
+        fever_present = r2c2.checkbox("Fever", key=f"{key_prefix}_fever_ci")
+        med_taken     = r2c3.checkbox("Medication taken today", value=True,
+                                      key=f"{key_prefix}_med_ci")
 
-        sleep_hours = st.slider("Sleep last night (hours)", 0.0, 12.0, 7.0, 0.5)
+        sleep_hours = st.slider("Sleep last night (hours)", 0.0, 12.0, 7.0, 0.5,
+                                key=f"{key_prefix}_sleep_ci")
 
         st.subheader("Location (for weather data)")
+        use_location = st.checkbox("Include location", value=True,
+                                   key=f"{key_prefix}_useloc_ci")
         lc1, lc2 = st.columns(2)
-        latitude  = lc1.number_input("Latitude",  min_value=-90.0,  max_value=90.0,  value=_DEFAULT_LAT, step=0.0001, format="%.4f")
-        longitude = lc2.number_input("Longitude", min_value=-180.0, max_value=180.0, value=_DEFAULT_LON, step=0.0001, format="%.4f")
+        latitude  = lc1.number_input("Latitude",  -90.0,  90.0, _DEFAULT_LAT, 0.0001,
+                                     format="%.4f", key=f"{key_prefix}_lat_ci",
+                                     disabled=not use_location)
+        longitude = lc2.number_input("Longitude", -180.0, 180.0, _DEFAULT_LON, 0.0001,
+                                     format="%.4f", key=f"{key_prefix}_lon_ci",
+                                     disabled=not use_location)
 
-        use_location = st.checkbox("Include location in check-in (enables weather data)", value=True)
-
-        submitted = st.form_submit_button("Submit check-in", type="primary")
+        submitted = st.form_submit_button("Submit check-in", type="primary",
+                                          use_container_width=True)
 
     if submitted:
         payload: dict = {
-            "patient_id": patient_id,
+            "patient_id": pid,
             "pain_score": int(pain_score),
             "fluid_intake_glasses": int(fluid_intake_glasses),
             "urine_colour": int(urine_colour),
@@ -709,25 +650,23 @@ def weather_checkin_page() -> None:
 def _show_checkin_result(data: dict) -> None:
     tier   = data.get("risk_tier", "LOW")
     score  = data.get("risk_score", 0.0)
-    colour = _RISK_COLOURS.get(tier, "#378ADD")
+    colour = {"HIGH": "#A32D2D", "MODERATE": "#854F0B", "LOW": "#3B6D11"}.get(tier, "#378ADD")
 
     st.divider()
-    st.subheader("Check-in result")
 
     # Risk gauge
     fig = go.Figure(go.Indicator(
-        mode="gauge+number+delta",
+        mode="gauge+number",
         value=round(score * 100, 1),
         number={"suffix": "%", "font": {"color": colour}},
         gauge={
             "axis": {"range": [0, 100]},
             "bar": {"color": colour},
             "steps": [
-                {"range": [0, 30],  "color": "#dfd"},
-                {"range": [30, 60], "color": "#ffd"},
+                {"range": [0, 30],   "color": "#dfd"},
+                {"range": [30, 60],  "color": "#ffd"},
                 {"range": [60, 100], "color": "#fdd"},
             ],
-            "threshold": {"line": {"color": colour, "width": 4}, "thickness": 0.8, "value": score * 100},
         },
         title={"text": f"VOC Risk — {tier}"},
     ))
@@ -735,27 +674,24 @@ def _show_checkin_result(data: dict) -> None:
     st.plotly_chart(fig, use_container_width=True)
 
     # SHAP factors
-    shap_factors: list[dict] = data.get("shap_factors", [])
+    shap_factors = data.get("shap_factors", [])
     if shap_factors:
-        st.markdown("**Top risk factors (SHAP)**")
+        st.markdown("**Top risk factors**")
         for sf in shap_factors:
-            icon = "📈" if sf.get("direction") == "increases" else "📉"
-            factor_name = sf["factor"].replace("_", " ").title()
+            icon   = "📈" if sf.get("direction") == "increases" else "📉"
+            name   = sf["factor"].replace("_", " ").title()
             contrib = sf.get("contribution")
-            contrib_str = f"  `{contrib:+.3f}`" if contrib is not None else ""
-            st.markdown(f"{icon} **{factor_name}** — {sf['direction']} risk{contrib_str}")
+            suffix  = f"  `{contrib:+.3f}`" if contrib is not None else ""
+            st.markdown(f"{icon} **{name}** — {sf['direction']} risk{suffix}")
 
-    # Suggestion
     if data.get("suggestion"):
         st.info(f"💬 {data['suggestion']}")
 
-    st.divider()
-
-    # Weather alerts
+    # Weather + hydration row
     weather_alerts: list[str] = data.get("weather_alerts", [])
-    col1, col2 = st.columns(2)
+    col_w, col_h = st.columns(2)
 
-    with col1:
+    with col_w:
         st.markdown("**🌤 Weather alerts**")
         if weather_alerts:
             for alert in weather_alerts:
@@ -765,72 +701,345 @@ def _show_checkin_result(data: dict) -> None:
                     unsafe_allow_html=True,
                 )
         else:
-            st.markdown("✅ No weather-related VOC risk alerts.")
-            st.caption("Ensure location was provided to enable weather data.")
+            st.markdown("✅ No weather risk alerts.")
 
-    with col2:
-        st.markdown("**💧 Hydration assessment**")
-        hydration_status  = data.get("hydration_status", "—")
-        hydration_message = data.get("hydration_message", "")
-        hydration_advice  = data.get("hydration_advice", "")
-
-        status_icon = "✅" if hydration_status == "WELL_HYDRATED" else "⚠️"
-        st.markdown(f"{status_icon} **{hydration_status.replace('_', ' ').title()}**")
-        if hydration_message:
-            st.caption(hydration_message)
-        if hydration_advice:
+    with col_h:
+        st.markdown("**💧 Hydration**")
+        hstatus = data.get("hydration_status", "—")
+        hicon   = "✅" if hstatus == "WELL_HYDRATED" else "⚠️"
+        st.markdown(f"{hicon} **{hstatus.replace('_', ' ').title()}**")
+        if data.get("hydration_message"):
+            st.caption(data["hydration_message"])
+        if data.get("hydration_advice"):
             st.markdown(
-                f'<div class="alert-box">📋 {hydration_advice}</div>',
+                f'<div class="alert-box">📋 {data["hydration_advice"]}</div>',
                 unsafe_allow_html=True,
             )
 
-    # Weather reference
-    if weather_alerts:
-        with st.expander("About weather risk factors"):
-            st.markdown("""
-**Temperature thresholds** (Nolan et al. 2008):
-- Heat stress (> 35 °C) — vasoconstriction and dehydration risk
-- Cold stress (< 15 °C) — vasospasm triggering VOC
-
-**Air quality** (Yallop et al. 2007):
-- AQI ≥ 3 — significantly associated with SCD hospitalisation
-            """)
-
 
 # ---------------------------------------------------------------------------
-# Register patient
+# Shared — Pain forms and charts
 # ---------------------------------------------------------------------------
 
-def register_page() -> None:
-    st.header("Register new patient")
+_PAIN_LOCATIONS = ["CHEST", "BACK", "ABDOMEN", "L_ARM", "R_ARM", "L_LEG", "R_LEG", "HEAD", "OTHER"]
+_LOCATION_LABELS = {
+    "CHEST": "Chest", "BACK": "Back", "ABDOMEN": "Abdomen",
+    "L_ARM": "Left arm", "R_ARM": "Right arm",
+    "L_LEG": "Left leg", "R_LEG": "Right leg",
+    "HEAD": "Head", "OTHER": "Other",
+}
 
-    with st.form("register"):
-        name      = st.text_input("Full name")
-        phone     = st.text_input("Phone number (optional)")
-        dob       = st.date_input("Date of birth", value=None)
-        diagnosis = st.selectbox(
-            "Diagnosis type",
-            ["HbSS", "HbSC", "HbS/beta-thalassaemia", "Other"],
+
+def _pain_log_form(pid: str, key_prefix: str) -> None:
+    with st.form(f"{key_prefix}_pain_form"):
+        pain_score = st.slider("Pain score (0 = none, 10 = worst)", 0, 10, 0,
+                               key=f"{key_prefix}_pain_score")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            locations = st.multiselect(
+                "Pain locations",
+                _PAIN_LOCATIONS,
+                format_func=lambda x: _LOCATION_LABELS[x],
+                key=f"{key_prefix}_locs",
+            )
+        with col2:
+            st.markdown("**Triggers**")
+            trigger_cold        = st.checkbox("Cold exposure",    key=f"{key_prefix}_tcold")
+            trigger_stress      = st.checkbox("Stress",           key=f"{key_prefix}_tstress")
+            trigger_exercise    = st.checkbox("Exercise",         key=f"{key_prefix}_texercise")
+            trigger_infection   = st.checkbox("Infection",        key=f"{key_prefix}_tinfect")
+            trigger_dehydration = st.checkbox("Dehydration",      key=f"{key_prefix}_tdehydr")
+            trigger_other       = st.text_input("Other trigger",  key=f"{key_prefix}_tother")
+
+        st.markdown("**Medication taken**")
+        mc1, mc2, mc3 = st.columns(3)
+        took_paracetamol = mc1.checkbox("Paracetamol", key=f"{key_prefix}_para")
+        took_ibuprofen   = mc2.checkbox("Ibuprofen",   key=f"{key_prefix}_ibu")
+        took_opioid      = mc3.checkbox("Opioid",      key=f"{key_prefix}_opi")
+
+        any_med = took_paracetamol or took_ibuprofen or took_opioid
+        relief  = st.select_slider(
+            "Pain relief effectiveness",
+            [0, 1, 2, 3],
+            format_func=lambda x: ["No medication / no effect", "Mild", "Moderate", "Good"][x],
+            value=0,
+            key=f"{key_prefix}_relief",
         )
-        submitted = st.form_submit_button("Register patient")
+        notes = st.text_area("Notes (optional)", height=70, key=f"{key_prefix}_notes")
+
+        submitted = st.form_submit_button("Log pain entry", type="primary",
+                                          use_container_width=True)
 
     if submitted:
-        if not name:
-            st.error("Name is required.")
-            return
-        payload = {
-            "name": name,
-            "phone": phone or None,
-            "dob": str(dob) if dob else None,
-            "diagnosis_type": diagnosis,
-        }
-        resp = _api("post", "/patients", headers=_headers(), json=payload)
-        if resp and resp.status_code == 201:
-            pid = resp.json()["id"]
-            st.success(f"Patient registered. ID: `{pid}`")
+        resp = _api("post", "/pain", headers=_headers(), json={
+            "patient_id": pid,
+            "pain_score": int(pain_score),
+            "pain_locations": locations or None,
+            "trigger_cold": trigger_cold,
+            "trigger_stress": trigger_stress,
+            "trigger_exercise": trigger_exercise,
+            "trigger_infection": trigger_infection,
+            "trigger_dehydration": trigger_dehydration,
+            "trigger_other": trigger_other or None,
+            "took_paracetamol": took_paracetamol,
+            "took_ibuprofen": took_ibuprofen,
+            "took_opioid": took_opioid,
+            "pain_relief_rating": int(relief) if any_med else None,
+            "notes": notes or None,
+        })
+        if resp and resp.status_code == 200:
+            _show_pain_result(resp.json())
         else:
             detail = resp.json().get("detail", "Unknown error") if resp else "No response"
-            st.error(f"Registration failed: {detail}")
+            st.error(f"Failed: {detail}")
+
+
+def _show_pain_result(data: dict) -> None:
+    if data.get("chest_pain_alert"):
+        st.markdown(
+            '<div class="breakthrough">🚨 <strong>Chest pain detected — CHW alert queued.</strong></div>',
+            unsafe_allow_html=True,
+        )
+    elif data.get("is_breakthrough"):
+        st.markdown(
+            '<div class="breakthrough">⚠️ <strong>Breakthrough pain event — CHW alert queued.</strong></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.success(f"Pain entry logged — score {data['pain_score']}/10")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Pain score", f"{data['pain_score']}/10")
+
+    slope = data.get("pain_slope_3d")
+    if slope is not None:
+        trend = "Rising ▲" if slope > 0.3 else ("Falling ▼" if slope < -0.3 else "Stable →")
+        c2.metric("3-day trend", trend, f"{slope:+.1f}/day")
+    else:
+        c2.metric("3-day trend", "—")
+
+    locs = data.get("pain_locations") or []
+    c3.metric("Locations", ", ".join(_LOCATION_LABELS.get(l, l) for l in locs) or "—")
+
+    if data.get("suggestion"):
+        st.info(f"💬 {data['suggestion']}")
+
+
+def _show_pain_history(pid: str) -> None:
+    days = st.slider("Days of history", 7, 90, 30, key="pain_hist_slider")
+    resp = _api("get", f"/patients/{pid}/pain", headers=_headers(), params={"days": days})
+    if not resp or resp.status_code != 200:
+        st.warning("Could not load pain history.")
+        return
+    entries: list[dict] = resp.json()
+    if not entries:
+        st.info("No pain diary entries in this period.")
+        return
+
+    _pain_history_chart(entries)
+    st.caption(f"{len(entries)} entries in the last {days} days")
+
+    with st.expander("View all entries"):
+        for e in reversed(entries):
+            ts    = e.get("recorded_at", "")[:16].replace("T", " ")
+            score = e.get("pain_score", 0)
+            locs  = ", ".join(_LOCATION_LABELS.get(l, l) for l in (e.get("pain_locations") or []))
+            flags = []
+            if e.get("is_breakthrough"):
+                flags.append("⭐ Breakthrough")
+            if e.get("chest_pain_alert"):
+                flags.append("🚨 Chest pain")
+            st.markdown(
+                f"`{ts}` — **{score}/10**"
+                + (f" · {locs}" if locs else "")
+                + (f" · {' · '.join(flags)}" if flags else "")
+            )
+
+
+def _pain_history_chart(entries: list[dict]) -> None:
+    dates  = [e.get("recorded_at", "")[:10] for e in entries]
+    scores = [e.get("pain_score", 0) for e in entries]
+    breaks = [e.get("is_breakthrough", False) for e in entries]
+
+    fig = go.Figure(go.Scatter(
+        x=dates, y=scores, mode="lines+markers", name="Pain score",
+        line=dict(color="#A32D2D", width=2),
+        marker=dict(
+            size=[12 if b else 7 for b in breaks],
+            color=["#A32D2D" if b else "#E07070" for b in breaks],
+            symbol=["star" if b else "circle" for b in breaks],
+        ),
+    ))
+    fig.add_hline(y=7, line_dash="dash", line_color="orange",
+                  annotation_text="Breakthrough threshold")
+    fig.update_layout(
+        height=240, margin=dict(l=0, r=0, t=30, b=0),
+        yaxis=dict(title="Pain score", range=[0, 10]),
+        plot_bgcolor="white",
+        title="Pain history — ⭐ breakthrough events",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+# ---------------------------------------------------------------------------
+# Shared — Hydration forms and charts
+# ---------------------------------------------------------------------------
+
+_DRINK_TYPES  = ["WATER", "JUICE", "MILK", "TEA", "COFFEE", "SODA", "OTHER"]
+_DRINK_LABELS = {
+    "WATER": "💧 Water", "JUICE": "🥤 Juice", "MILK": "🥛 Milk",
+    "TEA":   "🍵 Tea",   "COFFEE": "☕ Coffee", "SODA": "🫧 Soda",
+    "OTHER": "Other",
+}
+_HYDRATION_COLOUR = {
+    "WELL_HYDRATED": "#3B6D11", "MILD_RISK": "#854F0B",
+    "MODERATE_RISK": "#854F0B", "SEVERE_RISK": "#A32D2D", "CRITICAL": "#A32D2D",
+}
+_WHO_TARGET_ML = 2000
+
+
+def _hydration_log_form(pid: str, key_prefix: str) -> None:
+    with st.form(f"{key_prefix}_hydration_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            drink_type = st.selectbox(
+                "Drink type", _DRINK_TYPES,
+                format_func=lambda x: _DRINK_LABELS[x],
+                key=f"{key_prefix}_dtype",
+            )
+            drink_vol = st.number_input(
+                "Volume (ml)", min_value=50, max_value=2000, value=250, step=50,
+                key=f"{key_prefix}_dvol",
+            )
+            if drink_type in ("TEA", "COFFEE"):
+                st.caption("⚠️ Stored at 80% effective volume (mild diuretic).")
+
+        with col2:
+            urine_colour = st.select_slider(
+                "Urine colour (Armstrong scale)",
+                options=list(range(1, 9)),
+                format_func=lambda x: {
+                    1: "1 — Pale straw", 2: "2 — Straw", 3: "3 — Yellow",
+                    4: "4 — Dark yellow", 5: "5 — Amber", 6: "6 — Dark amber",
+                    7: "7 — Honey",      8: "8 — Brown",
+                }[x],
+                value=3,
+                key=f"{key_prefix}_uc",
+            )
+            thirst = st.select_slider(
+                "Thirst level", [1, 2, 3, 4],
+                format_func=lambda x: ["1 — Not thirsty", "2 — Slightly", "3 — Moderately", "4 — Very thirsty"][x - 1],
+                value=1,
+                key=f"{key_prefix}_thirst",
+            )
+
+        s1, s2, s3 = st.columns(3)
+        dry_mouth = s1.checkbox("Dry mouth",  key=f"{key_prefix}_dry")
+        dizziness = s2.checkbox("Dizziness",  key=f"{key_prefix}_dizzy")
+        headache  = s3.checkbox("Headache",   key=f"{key_prefix}_head")
+
+        submitted = st.form_submit_button("Log drink", type="primary",
+                                          use_container_width=True)
+
+    if submitted:
+        resp = _api("post", "/hydration", headers=_headers(), json={
+            "patient_id": pid,
+            "drink_type": drink_type,
+            "drink_volume_ml": int(drink_vol),
+            "urine_colour": int(urine_colour),
+            "thirst_level": int(thirst),
+            "dry_mouth": dry_mouth,
+            "dizziness": dizziness,
+            "headache": headache,
+        })
+        if resp and resp.status_code == 200:
+            _show_hydration_result(resp.json())
+        else:
+            detail = resp.json().get("detail", "Unknown error") if resp else "No response"
+            st.error(f"Failed: {detail}")
+
+
+def _show_hydration_result(data: dict) -> None:
+    status    = data.get("hydration_status", "")
+    colour    = _HYDRATION_COLOUR.get(status, "#378ADD")
+    daily_ml  = data.get("daily_total_ml", 0)
+    daily_gl  = data.get("daily_total_glasses", 0.0)
+    pct       = min(daily_ml / _WHO_TARGET_ML * 100, 100)
+
+    st.success(f"{_DRINK_LABELS.get(data['drink_type'], data['drink_type'])} — {data['drink_volume_ml']} ml logged")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Daily total", f"{daily_ml} ml",  f"{daily_gl:.1f} glasses")
+    c2.metric("WHO target",  f"{_WHO_TARGET_ML} ml", f"{pct:.0f}% reached")
+    c3.metric("Status", status.replace("_", " ").title())
+
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=daily_ml,
+        number={"suffix": " ml"},
+        gauge={
+            "axis": {"range": [0, 3000]},
+            "bar": {"color": colour},
+            "steps": [
+                {"range": [0, 1000],  "color": "#fdd"},
+                {"range": [1000, 1500], "color": "#ffd"},
+                {"range": [1500, 2000], "color": "#dfd"},
+                {"range": [2000, 3000], "color": "#cfc"},
+            ],
+            "threshold": {
+                "line": {"color": "green", "width": 3},
+                "thickness": 0.75,
+                "value": _WHO_TARGET_ML,
+            },
+        },
+        title={"text": "Daily fluid intake"},
+    ))
+    fig.update_layout(height=240, margin=dict(l=20, r=20, t=40, b=0))
+    st.plotly_chart(fig, use_container_width=True)
+
+    if data.get("hydration_message"):
+        icon = "✅" if status == "WELL_HYDRATED" else "⚠️"
+        st.markdown(
+            f'<div class="alert-box">{icon} <strong>{data["hydration_message"]}</strong></div>',
+            unsafe_allow_html=True,
+        )
+    if data.get("hydration_advice"):
+        st.info(f"📋 {data['hydration_advice']}")
+    if data.get("suggestion"):
+        st.caption(f"💬 {data['suggestion']}")
+
+
+def _hydration_guide() -> None:
+    st.subheader("Hydration targets for SCD patients")
+    st.markdown("""
+**WHO oral rehydration guidelines** (Yallop et al. 2007) recommend **≥ 2 000 ml/day**.
+Dehydration increases VOC risk (OR ≈ 2.1).
+
+| Urine colour | Meaning | Action |
+|---|---|---|
+| 1–2 Pale straw | Well hydrated ✅ | Maintain intake |
+| 3–4 Yellow | Adequate | Drink more water |
+| 5–6 Amber | Mild dehydration ⚠️ | 250 ml water now |
+| 7–8 Dark/brown | Severe dehydration 🚨 | Seek medical attention |
+    """)
+    colours_hex = ["#FFF8DC", "#F5DEB3", "#FFD700", "#DAA520",
+                   "#CD853F", "#8B6914", "#8B4513", "#4B2F1A"]
+    fig = go.Figure(go.Bar(
+        x=[f"Colour {i}" for i in range(1, 9)],
+        y=[1] * 8,
+        marker_color=colours_hex,
+        text=["Pale straw", "Straw", "Yellow", "Dark yellow",
+              "Amber", "Dark amber", "Honey", "Brown"],
+        textposition="inside",
+        hovertemplate="%{text}<extra></extra>",
+    ))
+    fig.update_layout(
+        height=110, margin=dict(l=0, r=0, t=10, b=30),
+        showlegend=False, yaxis=dict(visible=False),
+        title="Armstrong (1994) urine colour chart",
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # ---------------------------------------------------------------------------
@@ -839,26 +1048,20 @@ def register_page() -> None:
 
 def about_page() -> None:
     st.header("About Warrior Blood")
-    st.markdown("""
-**Warrior Blood** is a Sickle Cell Disease (SCD) patient monitoring system
-developed as an MSc Software Engineering project at the University of Greater Manchester.
+    role = st.session_state.get("role", "patient")
+    st.markdown(f"""
+**Warrior Blood** is a Sickle Cell Disease (SCD) patient monitoring system developed as an
+MSc Software Engineering dissertation at the University of Greater Manchester.
 
 **Renee Tucker · Supervisor: Aamir Abbas · 2025–26**
 
 ---
 
-### MVP components
-- **FastAPI backend** — patient check-in, VOC risk scoring, CHW alerts
-- **LightGBM ONNX predictor** — trained on synthetic SCD diary data (AUROC 0.808)
-- **SHAP explanations** — top-3 plain-English risk factors per check-in (Lundberg & Lee 2017)
-- **Hydration module** — WHO oral rehydration guideline thresholds (Yallop et al. 2007)
-- **Pain diary** — trend detection, breakthrough events, chest pain alerts (Brandow et al. 2020)
-- **Weather integration** — OpenWeatherMap temperature and AQI risk flags (Nolan et al. 2008)
-- **MySQL 8.0** — production-ready database with Fernet-encrypted PHI
-- **Streamlit CHW dashboard** — triage, pain diary, hydration diary, weather check-in
+### How it works
+{"**CHW view:** Register patients, monitor triage list sorted by VOC risk, view patient-logged pain and hydration data in real time, send manual SMS alerts." if role in ("chw","admin") else "**Patient view:** Log daily symptoms, pain diary entries and hydration intake. Your data is immediately visible to your Community Health Worker."}
 
-### Key references
-- Machado et al. (2024) — LightGBM on SCD prediction
+### Clinical references
+- Machado et al. (2024) — LightGBM on SCD prediction (AUROC 0.808)
 - Brandow et al. (2020) — pain trajectories in SCD
 - Yallop et al. (2007) — dehydration, AQI and SCD hospitalisation
 - Nolan et al. (2008) — temperature and SCD hospitalisation
@@ -866,10 +1069,6 @@ developed as an MSc Software Engineering project at the University of Greater Ma
 - Lundberg & Lee (2017) — SHAP values
 - Armstrong (1994) — urine colour chart (1–8 scale)
 - WHO (2005) — oral rehydration guidelines
-
-### MVP limitations
-- SMS alerts are stubbed (logged only — integrate Africa's Talking for production)
-- No patient-facing mobile app yet (planned: React Native)
     """)
 
 
@@ -877,7 +1076,4 @@ developed as an MSc Software Engineering project at the University of Greater Ma
 # Entry point
 # ---------------------------------------------------------------------------
 
-if "token" not in st.session_state:
-    login_page()
-else:
-    dashboard()
+main()
