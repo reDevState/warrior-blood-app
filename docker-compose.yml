@@ -1,0 +1,32 @@
+# Warrior Blood MVP — Docker Compose
+# Runs API + Dashboard with SQLite (no PostgreSQL/Redis needed for MVP)
+# Production: swap to docker-compose.prod.yml which adds PostgreSQL + Redis + Celery
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data  # persist SQLite
+      - ./models:/app/models
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  dashboard:
+    build: .
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    environment:
+      - API_BASE_URL=http://api:8000
+    depends_on:
+      - api
+    command: streamlit run dashboard/chw_dashboard.py --server.port 8501 --server.address 0.0.0.0
