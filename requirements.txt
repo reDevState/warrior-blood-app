@@ -28,24 +28,25 @@ requests==2.32.2
 pytest==8.2.1
 pytest-asyncio==0.23.7
 httpx==0.27.0
-coverage==7.5.1
+coverage==7.3.4
 pytest-cov==5.0.0
 
 # Config
 python-dotenv==1.0.1
+setuptools==69.0.3
 
 alembic==1.13.1
-asyncpg==0.30.0
-psycopg2-binary==2.9.10
+aiomysql==0.2.0
+pymysql==1.1.1
 
-# --- Optional: ML training (uncomment when running ml/train_model.py) ---
-# lightgbm==4.3.0
-# scikit-learn==1.5.0
-# imbalanced-learn==0.12.3
-# numpy==1.26.4
-# pandas==2.2.2
-# shap==0.45.0
-# mlflow==2.13.1
-# onnxmltools==1.12.0
-# skl2onnx==1.17.0
-# onnxruntime==1.18.0
+# ML — LightGBM ONNX pipeline (required for production predictor)
+lightgbm==4.3.0
+scikit-learn==1.5.0
+imbalanced-learn==0.12.3
+numpy==1.26.4
+pandas==2.2.2
+shap==0.45.0
+onnx==1.16.1
+onnxruntime==1.18.0
+onnxmltools==1.12.0
+skl2onnx==1.17.0

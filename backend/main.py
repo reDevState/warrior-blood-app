@@ -29,13 +29,19 @@ from backend.auth import authenticate_user, create_access_token, decode_token, d
 from backend.database import AsyncSessionLocal, create_tables, get_db
 from backend.hydration import hydration_risk
 from backend.ml_predictor import predict
-from backend.models import AlertLog, DiaryEntry, Patient, User
+from backend.models import AlertLog, DiaryEntry, HydrationEntry, PainDiaryEntry, Patient, User
+from backend.pain_analysis import compute_pain_trend
+from backend.weather import WeatherData, get_weather
 from backend.schemas import (
     AlertRequest,
     AlertResponse,
     CheckinRequest,
     CheckinResponse,
     DiaryEntryResponse,
+    HydrationLogRequest,
+    HydrationLogResponse,
+    PainDiaryRequest,
+    PainDiaryResponse,
     PatientCreate,
     PatientResponse,
     SHAPFactor,
@@ -49,7 +55,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 
 _DEFAULT_USERS = [
-    {"username": "test_patient", "password": "testpassword", "role": "patient", "patient_id": "mvp-patient-001"},
+    {"username": "test_patient", "password": "testpassword", "role": "patient", "patient_id": None},
     {"username": "test_chw",     "password": "chwpassword",  "role": "chw",     "patient_id": None},
 ]
 
@@ -83,8 +89,7 @@ app = FastAPI(
     version="0.1.0-mvp",
     description=(
         "SCD patient VOC risk prediction API. "
-        "MVP uses SQLite + rule-based ML. "
-        "Production: PostgreSQL + LightGBM ONNX."
+        "MVP uses MySQL + LightGBM ONNX predictor."
     ),
     lifespan=lifespan,
 )
@@ -181,6 +186,7 @@ async def register_patient(
     patient = Patient(
         name_enc=encrypt_phi(data.name),
         phone_enc=encrypt_phi(data.phone) if data.phone else None,
+        email_enc=encrypt_phi(data.email.strip().lower()) if data.email else None,
         dob=data.dob,
         diagnosis_type=data.diagnosis_type,
     )
@@ -189,6 +195,7 @@ async def register_patient(
     return PatientResponse(
         id=patient.id,
         name=data.name,
+        email=data.email,
         diagnosis_type=patient.diagnosis_type,
         enrolled_at=patient.enrolled_at,
     )
@@ -256,7 +263,27 @@ async def patient_checkin(
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
 
-    # Run ML prediction
+    # Fetch weather — degrades gracefully when offline or lat/lon absent
+    weather: WeatherData = WeatherData()
+    if data.latitude and data.longitude:
+        weather = get_weather(data.latitude, data.longitude)
+
+    # Collect weather alerts for patient-facing response
+    weather_alerts: list[str] = []
+    if weather.cold_stress_alert:
+        weather_alerts.append(
+            f"Cold stress alert: {weather.ambient_temp_c}°C — keep warm, dress in layers."
+        )
+    if weather.heat_stress_alert:
+        weather_alerts.append(
+            f"Heat stress alert: {weather.ambient_temp_c}°C — drink extra fluids, stay in shade."
+        )
+    if weather.aqi_alert:
+        weather_alerts.append(
+            "Poor air quality today — avoid outdoor exertion and keep windows closed."
+        )
+
+    # Run ML prediction (weather features forwarded for future ONNX model)
     prediction = predict({
         "pain_score": data.pain_score,
         "body_temp_c": data.body_temp_c,
@@ -265,6 +292,9 @@ async def patient_checkin(
         "urine_colour": data.urine_colour,
         "med_taken": data.med_taken,
         "sleep_hours": data.sleep_hours,
+        "ambient_temp_c": weather.ambient_temp_c,
+        "humidity_pct": weather.humidity_pct,
+        "aqi": weather.aqi,
     })
 
     # Run hydration risk scoring
@@ -275,7 +305,7 @@ async def patient_checkin(
         dry_mouth=data.dry_mouth,
     )
 
-    # Persist diary entry
+    # Persist diary entry with weather snapshot
     entry = DiaryEntry(
         patient_id=data.patient_id,
         entry_date=date.today(),
@@ -286,6 +316,14 @@ async def patient_checkin(
         urine_colour=data.urine_colour,
         med_taken=data.med_taken,
         sleep_hours=data.sleep_hours,
+        ambient_temp_c=weather.ambient_temp_c,
+        feels_like_c=weather.feels_like_c,
+        humidity_pct=weather.humidity_pct,
+        aqi=weather.aqi,
+        pm25_ugm3=weather.pm25_ugm3,
+        cold_stress_alert=weather.cold_stress_alert,
+        heat_stress_alert=weather.heat_stress_alert,
+        aqi_alert=weather.aqi_alert,
         risk_score=prediction.risk_score,
         risk_tier=prediction.risk_tier,
         hydration_status=hydration.status,
@@ -314,11 +352,37 @@ async def patient_checkin(
         risk_score=prediction.risk_score,
         risk_tier=prediction.risk_tier,
         shap_factors=[SHAPFactor(**f) for f in prediction.shap_factors],
+        suggestion=prediction.suggestion,
         hydration_status=hydration.status,
         hydration_message=hydration.message,
         hydration_advice=hydration.advice,
+        weather_alerts=weather_alerts,
         created_at=entry.created_at,
     )
+
+
+# ---------------------------------------------------------------------------
+# Lookup by email (patient self-service — any valid token)
+# ---------------------------------------------------------------------------
+
+@app.get("/patients/lookup", tags=["patients"])
+async def lookup_patient_by_email(
+    email: str,
+    _: Annotated[dict, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    """Find a patient's ID by their registered email address."""
+    result = await db.execute(select(Patient))
+    patients = result.scalars().all()
+    needle = email.strip().lower()
+    for p in patients:
+        if p.email_enc:
+            try:
+                if decrypt_phi(p.email_enc) == needle:
+                    return {"patient_id": p.id}
+            except Exception:
+                continue
+    raise HTTPException(status_code=404, detail="No patient found with that email address")
 
 
 # ---------------------------------------------------------------------------
@@ -394,4 +458,249 @@ async def send_alert(
         channel=data.channel,
         message=data.message,
         queued_at=alert.sent_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pain diary
+# ---------------------------------------------------------------------------
+
+def _pain_suggestion(trend, data: PainDiaryRequest) -> str:
+    """Return a plain-English self-care suggestion based on the pain trend."""
+    if trend.is_chest_pain:
+        return (
+            "Chest pain can be a sign of acute chest syndrome — a medical emergency. "
+            "Go to your nearest hospital immediately or call your CHW."
+        )
+    if trend.is_breakthrough:
+        return (
+            "You are having a breakthrough pain event. "
+            "Take your prescribed analgesics now, drink 2 glasses of water, "
+            "rest, and contact your CHW."
+        )
+    if trend.is_rising:
+        return (
+            "Your pain has been rising over the past 3 days. "
+            "Increase fluids to 8+ glasses today, avoid cold and exertion, "
+            "and take your medication as prescribed."
+        )
+    if data.pain_score >= 7:
+        return (
+            "High pain today. Take your prescribed pain relief, "
+            "rest, and keep warm. Contact your CHW if this continues."
+        )
+    if data.pain_score <= 2:
+        return (
+            "Pain is well controlled today — great. "
+            "Keep up your fluids and medication to maintain this."
+        )
+    return (
+        "Moderate pain today. Drink at least 8 glasses of water, "
+        "take your medication, and rest if possible."
+    )
+
+
+@app.post("/pain", response_model=PainDiaryResponse, tags=["pain"])
+async def log_pain_entry(
+    data: PainDiaryRequest,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Log a detailed pain diary entry.
+
+    Computes pain trend, detects breakthrough events and chest pain,
+    and returns a plain-English suggestion.
+    Chest pain or a breakthrough event auto-queues a CHW alert.
+    """
+    patient = await db.get(Patient, data.patient_id)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    cutoff = datetime.utcnow() - timedelta(days=7)
+    result = await db.execute(
+        select(PainDiaryEntry)
+        .where(
+            PainDiaryEntry.patient_id == data.patient_id,
+            PainDiaryEntry.recorded_at >= cutoff,
+        )
+        .order_by(PainDiaryEntry.recorded_at.asc())
+    )
+    recent_scores = [e.pain_score for e in result.scalars().all()]
+
+    locs = data.pain_locations or []
+    trend = compute_pain_trend(recent_scores, data.pain_score, locs)
+    suggestion = _pain_suggestion(trend, data)
+
+    entry = PainDiaryEntry(
+        patient_id=data.patient_id,
+        pain_score=data.pain_score,
+        pain_locations=",".join(locs) if locs else None,
+        trigger_cold=data.trigger_cold,
+        trigger_stress=data.trigger_stress,
+        trigger_exercise=data.trigger_exercise,
+        trigger_infection=data.trigger_infection,
+        trigger_dehydration=data.trigger_dehydration,
+        trigger_other=data.trigger_other,
+        took_paracetamol=data.took_paracetamol,
+        took_ibuprofen=data.took_ibuprofen,
+        took_opioid=data.took_opioid,
+        pain_relief_rating=data.pain_relief_rating,
+        is_breakthrough=trend.is_breakthrough,
+        notes=data.notes,
+    )
+    db.add(entry)
+    await db.flush()
+
+    if trend.is_chest_pain or trend.is_breakthrough:
+        alert_msg = (
+            "URGENT: Chest pain reported"
+            if trend.is_chest_pain
+            else f"Breakthrough pain event — score {data.pain_score}/10"
+        )
+        db.add(AlertLog(
+            patient_id=data.patient_id,
+            channel="sms",
+            message=alert_msg,
+            delivered=False,
+        ))
+
+    return PainDiaryResponse(
+        entry_id=entry.id,
+        patient_id=data.patient_id,
+        pain_score=data.pain_score,
+        pain_locations=locs or None,
+        is_breakthrough=trend.is_breakthrough,
+        chest_pain_alert=trend.is_chest_pain,
+        pain_slope_3d=trend.slope_3d,
+        suggestion=suggestion,
+        recorded_at=entry.recorded_at,
+    )
+
+
+@app.get("/patients/{patient_id}/pain", tags=["pain"])
+async def pain_history(
+    patient_id: str,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+    days: int = 30,
+):
+    """Return last N days of pain diary entries for a patient."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    result = await db.execute(
+        select(PainDiaryEntry)
+        .where(
+            PainDiaryEntry.patient_id == patient_id,
+            PainDiaryEntry.recorded_at >= cutoff,
+        )
+        .order_by(PainDiaryEntry.recorded_at.asc())
+    )
+    return [
+        {
+            "recorded_at": str(e.recorded_at)[:10],
+            "pain_score": e.pain_score,
+            "locations": e.pain_locations,
+            "is_breakthrough": e.is_breakthrough,
+        }
+        for e in result.scalars().all()
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Hydration diary
+# ---------------------------------------------------------------------------
+
+def _hydration_suggestion(status: str, remaining_ml: int, drink_type: str) -> str:
+    """Return a plain-English hydration suggestion based on current status."""
+    glasses_left = remaining_ml // 250
+    if status == "SEVERE_RISK":
+        return (
+            "You are severely dehydrated. Drink water NOW — at least 2 large glasses. "
+            "Contact your CHW immediately if you feel dizzy or cannot drink."
+        )
+    if status == "MODERATE_RISK":
+        return (
+            f"You need more fluids. Try to drink {glasses_left} more glasses of "
+            "water before bedtime."
+        )
+    if drink_type in ("COFFEE", "TEA"):
+        return "Coffee and tea have a mild diuretic effect. Follow this with a glass of water."
+    if status == "WELL_HYDRATED":
+        return "Great hydration today! Keep sipping water regularly."
+    return f"Keep going — aim for {glasses_left} more glasses of water today."
+
+
+@app.post("/hydration", response_model=HydrationLogResponse, tags=["hydration"])
+async def log_hydration(
+    data: HydrationLogRequest,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Log an individual drink to the hydration diary.
+
+    Computes the running daily total, runs hydration risk assessment,
+    and returns a personalised hydration suggestion.
+    Coffee and tea are stored at 80% of their volume (mild diuretic effect).
+    """
+    patient = await db.get(Patient, data.patient_id)
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    effective_ml = (
+        int(data.drink_volume_ml * 0.8)
+        if data.drink_type in ("COFFEE", "TEA")
+        else data.drink_volume_ml
+    )
+
+    today = datetime.utcnow().date()
+    result = await db.execute(
+        select(HydrationEntry)
+        .where(
+            HydrationEntry.patient_id == data.patient_id,
+            HydrationEntry.entry_date == today,
+        )
+    )
+    prior_ml = sum(e.drink_volume_ml for e in result.scalars().all())
+    daily_total = prior_ml + effective_ml
+
+    glasses = daily_total // 250
+    h = hydration_risk(
+        fluid_intake_glasses=glasses,
+        urine_colour=data.urine_colour or 3,
+        thirst_level=data.thirst_level,
+        dry_mouth=data.dry_mouth,
+    )
+
+    remaining_ml = max(0, 2000 - daily_total)
+    suggestion = _hydration_suggestion(h.status, remaining_ml, data.drink_type)
+
+    entry = HydrationEntry(
+        patient_id=data.patient_id,
+        entry_date=today,
+        drink_type=data.drink_type,
+        drink_volume_ml=effective_ml,
+        daily_total_ml=daily_total,
+        urine_colour=data.urine_colour,
+        thirst_level=data.thirst_level,
+        dry_mouth=data.dry_mouth,
+        dizziness=data.dizziness,
+        headache=data.headache,
+        dark_urine_flag=(data.urine_colour or 0) >= 6,
+    )
+    db.add(entry)
+    await db.flush()
+
+    return HydrationLogResponse(
+        entry_id=entry.id,
+        patient_id=data.patient_id,
+        drink_type=data.drink_type,
+        drink_volume_ml=effective_ml,
+        daily_total_ml=daily_total,
+        daily_total_glasses=round(daily_total / 250, 1),
+        hydration_status=h.status,
+        hydration_message=h.message,
+        hydration_advice=h.advice,
+        suggestion=suggestion,
+        logged_at=entry.logged_at,
     )

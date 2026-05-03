@@ -29,6 +29,7 @@ class Patient(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     name_enc: Mapped[str] = mapped_column(Text, nullable=False)        # Fernet-encrypted
     phone_enc: Mapped[str] = mapped_column(Text, nullable=True)        # Fernet-encrypted
+    email_enc: Mapped[str | None] = mapped_column(Text, nullable=True) # Fernet-encrypted
     dob: Mapped[date | None] = mapped_column(Date, nullable=True)
     diagnosis_type: Mapped[str] = mapped_column(String(64), nullable=True)
     enrolled_at: Mapped[datetime] = mapped_column(
@@ -42,6 +43,12 @@ class Patient(Base):
         back_populates="patient", cascade="all, delete-orphan"
     )
     alert_logs: Mapped[list[AlertLog]] = relationship(
+        back_populates="patient", cascade="all, delete-orphan"
+    )
+    pain_entries: Mapped[list["PainDiaryEntry"]] = relationship(
+        back_populates="patient", cascade="all, delete-orphan"
+    )
+    hydration_entries: Mapped[list["HydrationEntry"]] = relationship(
         back_populates="patient", cascade="all, delete-orphan"
     )
 
@@ -71,9 +78,15 @@ class DiaryEntry(Base):
     med_taken: Mapped[bool] = mapped_column(Boolean, default=True)
     sleep_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    # Environmental (from OpenWeatherMap — may be None if offline)
+    # Environmental (from OpenWeatherMap — None if offline or no lat/lon supplied)
     ambient_temp_c: Mapped[float | None] = mapped_column(Float, nullable=True)
+    feels_like_c: Mapped[float | None] = mapped_column(Float, nullable=True)
     humidity_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    aqi: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pm25_ugm3: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cold_stress_alert: Mapped[bool] = mapped_column(Boolean, default=False)
+    heat_stress_alert: Mapped[bool] = mapped_column(Boolean, default=False)
+    aqi_alert: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # ML output
     risk_score: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -122,6 +135,88 @@ class AlertLog(Base):
     )
 
     patient: Mapped[Patient] = relationship(back_populates="alert_logs")
+
+
+class PainDiaryEntry(Base):
+    """
+    Detailed pain diary entry — one or more per day per patient.
+    Captures location, triggers, analgesic use, and breakthrough events.
+    Ref: Brandow et al. (2020), Smith et al. (2008)
+    """
+
+    __tablename__ = "pain_diary_entries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    patient_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("patients.id"), nullable=False, index=True
+    )
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    pain_score: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Body locations stored as comma-separated codes
+    # Valid: CHEST BACK ABDOMEN L_ARM R_ARM L_LEG R_LEG HEAD OTHER
+    pain_locations: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    # Trigger factors
+    trigger_cold: Mapped[bool] = mapped_column(Boolean, default=False)
+    trigger_stress: Mapped[bool] = mapped_column(Boolean, default=False)
+    trigger_exercise: Mapped[bool] = mapped_column(Boolean, default=False)
+    trigger_infection: Mapped[bool] = mapped_column(Boolean, default=False)
+    trigger_dehydration: Mapped[bool] = mapped_column(Boolean, default=False)
+    trigger_other: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    # Analgesic use
+    took_paracetamol: Mapped[bool] = mapped_column(Boolean, default=False)
+    took_ibuprofen: Mapped[bool] = mapped_column(Boolean, default=False)
+    took_opioid: Mapped[bool] = mapped_column(Boolean, default=False)
+    pain_relief_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 0–3
+
+    # Breakthrough: sudden spike >= 3 points above 7-day mean and score >= 7
+    is_breakthrough: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    patient: Mapped[Patient] = relationship(back_populates="pain_entries")
+
+
+class HydrationEntry(Base):
+    """
+    Hydration diary entry — may be logged multiple times daily.
+
+    Tracks individual drinks by type and cumulative daily intake.
+    Urine colour uses the Armstrong (1994) 1-8 chart.
+    Ref: Yallop et al. (2007), WHO (2005)
+    """
+
+    __tablename__ = "hydration_entries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    patient_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("patients.id"), nullable=False, index=True
+    )
+    logged_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
+
+    # Drink details
+    drink_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Effective volume (ml) — coffee/tea stored at 80% to account for diuretic effect
+    drink_volume_ml: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Running daily total across all entries for this patient-date
+    daily_total_ml: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Urine colour at time of logging (Armstrong 1994, 1–8)
+    urine_colour: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Dehydration symptoms at time of logging
+    thirst_level: Mapped[int] = mapped_column(Integer, default=1)  # 1–4
+    dry_mouth: Mapped[bool] = mapped_column(Boolean, default=False)
+    dizziness: Mapped[bool] = mapped_column(Boolean, default=False)
+    headache: Mapped[bool] = mapped_column(Boolean, default=False)
+    dark_urine_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    patient: Mapped[Patient] = relationship(back_populates="hydration_entries")
+
 
 class User(Base):
     """Persistent CHW / admin / patient account (replaces in-memory _USERS dict)."""

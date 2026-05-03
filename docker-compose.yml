@@ -1,16 +1,43 @@
 # Warrior Blood MVP — Docker Compose
-# Runs API + Dashboard with SQLite (no PostgreSQL/Redis needed for MVP)
-# Production: swap to docker-compose.prod.yml which adds PostgreSQL + Redis + Celery
+# Services: PostgreSQL, Redis (stub), API, Dashboard.
+# Run: docker compose up -d
+# Migrate: docker compose exec api alembic upgrade head
 
 services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: blood_root
+      MYSQL_DATABASE: warriorblood
+      MYSQL_USER: warrior
+      MYSQL_PASSWORD: blood
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "warrior", "--password=blood"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
   api:
     build: .
     ports:
       - "8000:8000"
     env_file:
       - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     volumes:
-      - ./data:/app/data  # persist SQLite
       - ./models:/app/models
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
@@ -30,3 +57,6 @@ services:
     depends_on:
       - api
     command: streamlit run dashboard/chw_dashboard.py --server.port 8501 --server.address 0.0.0.0
+
+volumes:
+  mysql_data:

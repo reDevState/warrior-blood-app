@@ -22,7 +22,7 @@ from backend.ml_predictor import predict
 from backend.models import Patient, User
 
 # ---------------------------------------------------------------------------
-# Test database — SQLite in-memory (never use dev PostgreSQL for tests)
+# Test database — SQLite in-memory (never use dev MySQL container for tests)
 # ---------------------------------------------------------------------------
 
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
@@ -325,6 +325,55 @@ def test_predict_shap_factors_format():
         assert factor["direction"] in ("increasing", "decreasing")
 
 
+def test_predict_suggestion_non_empty():
+    """predict() returns a non-empty suggestion string for all risk tiers."""
+    for payload, expected_tier in [
+        ({"pain_score": 1, "fluid_intake_glasses": 8, "urine_colour": 2, "med_taken": True}, "LOW"),
+        ({"pain_score": 9, "fever_present": True, "fluid_intake_glasses": 1,
+          "urine_colour": 8, "med_taken": False, "sleep_hours": 3}, "HIGH"),
+    ]:
+        result = predict(payload)
+        assert isinstance(result.suggestion, str)
+        assert len(result.suggestion) > 0
+        assert result.risk_tier == expected_tier
+
+
+def test_feature_vector_to_list():
+    """FeatureVector.to_list() returns a list of exactly 16 floats."""
+    from ml.features import FeatureVector, FEATURE_NAMES
+    fv = FeatureVector(pain_score=5.0, urine_colour=3.0)
+    values = fv.to_list()
+    assert len(values) == len(FEATURE_NAMES) == 16
+    assert values[0] == 5.0   # pain_score is first
+    assert values[6] == 3.0   # urine_colour is seventh
+
+
+def test_feature_names_matches_feature_vector_fields():
+    """FEATURE_NAMES must exactly match FeatureVector dataclass fields in order."""
+    from ml.features import FeatureVector, FEATURE_NAMES
+    import dataclasses
+    field_names = [f.name for f in dataclasses.fields(FeatureVector)]
+    assert field_names == FEATURE_NAMES
+
+
+def test_generate_synthetic_data_shape():
+    """generate_synthetic_data produces correct row count and VOC rate ~3-15%."""
+    from ml.train_model import generate_synthetic_data
+    df = generate_synthetic_data(n_patients=5, n_days=30)
+    assert len(df) == 150
+    assert "voc_72h" in df.columns
+    assert 0.02 <= df["voc_72h"].mean() <= 0.30
+
+
+def test_generate_synthetic_data_all_features_present():
+    """All 16 FEATURE_NAMES columns are present in the generated dataset."""
+    from ml.features import FEATURE_NAMES
+    from ml.train_model import generate_synthetic_data
+    df = generate_synthetic_data(n_patients=2, n_days=10)
+    for col in FEATURE_NAMES:
+        assert col in df.columns, f"Missing column: {col}"
+
+
 # ---------------------------------------------------------------------------
 # Patient list and history tests
 # ---------------------------------------------------------------------------
@@ -540,6 +589,27 @@ async def test_register_patient_full_fields(client):
 
 
 @pytest.mark.asyncio
+async def test_checkin_returns_suggestion(client, patient_id):
+    """Check-in response includes a non-empty suggestion string."""
+    token = await _patient_token(client)
+    resp = await client.post(
+        "/checkin",
+        json={
+            "patient_id": patient_id,
+            "pain_score": 5,
+            "fluid_intake_glasses": 5,
+            "urine_colour": 4,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "suggestion" in data
+    assert isinstance(data["suggestion"], str)
+    assert len(data["suggestion"]) > 0
+
+
+@pytest.mark.asyncio
 async def test_checkin_auto_creates_alert_for_high_risk(client, patient_id):
     """A HIGH-risk check-in automatically queues an alert entry."""
     token = await _patient_token(client)
@@ -578,14 +648,204 @@ async def test_alert_invalid_channel(client, patient_id):
     assert resp.status_code == 422
 
 
+# ---------------------------------------------------------------------------
+# Pain diary tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_log_pain_entry_basic(client, patient_id):
+    """Basic pain diary entry returns correct score and a suggestion string."""
+    token = await _patient_token(client)
+    resp = await client.post(
+        "/pain",
+        json={"patient_id": patient_id, "pain_score": 5, "pain_locations": ["BACK"]},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["pain_score"] == 5
+    assert "suggestion" in data
+    assert isinstance(data["suggestion"], str)
+    assert len(data["suggestion"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_chest_pain_triggers_alert(client, patient_id):
+    """Chest pain location sets chest_pain_alert and returns hospital advice."""
+    token = await _patient_token(client)
+    resp = await client.post(
+        "/pain",
+        json={"patient_id": patient_id, "pain_score": 8, "pain_locations": ["CHEST", "BACK"]},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["chest_pain_alert"] is True
+    assert "hospital" in data["suggestion"].lower()
+
+
+def test_compute_pain_trend_rising():
+    """Rising pain scores over 3 days produce a positive slope and is_rising flag."""
+    from backend.pain_analysis import compute_pain_trend
+    trend = compute_pain_trend([2, 4, 5], 7, ["BACK"])
+    assert trend.is_rising is True
+    assert trend.slope_3d > 0
+
+
+def test_compute_pain_trend_breakthrough():
+    """Score >= mean_7d + 3 and >= 7 flags a breakthrough event."""
+    from backend.pain_analysis import compute_pain_trend
+    trend = compute_pain_trend([2, 2, 2, 2, 2, 2, 2], 9, None)
+    assert trend.is_breakthrough is True
+
+
+# ---------------------------------------------------------------------------
+# Hydration diary tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_log_hydration_basic(client, patient_id):
+    """Water entry returns correct fields and a suggestion string."""
+    token = await _patient_token(client)
+    resp = await client.post(
+        "/hydration",
+        json={"patient_id": patient_id, "drink_type": "WATER", "drink_volume_ml": 250},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["drink_volume_ml"] == 250
+    assert data["daily_total_ml"] == 250
+    assert data["daily_total_glasses"] == 1.0
+    assert "hydration_status" in data
+    assert isinstance(data["suggestion"], str)
+    assert len(data["suggestion"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_log_hydration_coffee_diuretic(client, patient_id):
+    """Coffee volume is stored at 80% to account for diuretic effect."""
+    token = await _patient_token(client)
+    resp = await client.post(
+        "/hydration",
+        json={"patient_id": patient_id, "drink_type": "COFFEE", "drink_volume_ml": 250},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["drink_volume_ml"] == 200  # 250 * 0.8
+
+
+@pytest.mark.asyncio
+async def test_log_hydration_invalid_drink_type(client, patient_id):
+    """Drink type not in the allowed set returns 422."""
+    token = await _patient_token(client)
+    resp = await client.post(
+        "/hydration",
+        json={"patient_id": patient_id, "drink_type": "BEER", "drink_volume_ml": 330},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_log_hydration_daily_total_accumulates(client, patient_id):
+    """Daily total increases correctly across multiple entries."""
+    token = await _patient_token(client)
+    for _ in range(3):
+        await client.post(
+            "/hydration",
+            json={"patient_id": patient_id, "drink_type": "WATER", "drink_volume_ml": 250},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    resp = await client.post(
+        "/hydration",
+        json={"patient_id": patient_id, "drink_type": "WATER", "drink_volume_ml": 250},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["daily_total_ml"] == 1000
+    assert resp.json()["daily_total_glasses"] == 4.0
+
+
+# ---------------------------------------------------------------------------
+# Weather integration tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_checkin_with_location_degrades_gracefully(client, patient_id):
+    """Check-in with lat/lon but no API key returns 200 with empty weather_alerts."""
+    token = await _patient_token(client)
+    resp = await client.post(
+        "/checkin",
+        json={
+            "patient_id": patient_id,
+            "pain_score": 3,
+            "fluid_intake_glasses": 6,
+            "urine_colour": 3,
+            "latitude": 6.5244,
+            "longitude": 3.3792,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "weather_alerts" in data
+    assert isinstance(data["weather_alerts"], list)
+
+
+@pytest.mark.asyncio
+async def test_checkin_without_location_returns_empty_alerts(client, patient_id):
+    """Check-in without lat/lon still succeeds and returns empty weather_alerts."""
+    token = await _patient_token(client)
+    resp = await client.post(
+        "/checkin",
+        json={
+            "patient_id": patient_id,
+            "pain_score": 2,
+            "fluid_intake_glasses": 8,
+            "urine_colour": 2,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["weather_alerts"] == []
+
+
+def test_weather_client_returns_offline_without_api_key():
+    """get_weather returns offline WeatherData when no API key is configured."""
+    from backend.weather import WeatherData, get_weather
+    import os
+    original = os.environ.pop("OPENWEATHERMAP_API_KEY", None)
+    try:
+        result = get_weather(6.5244, 3.3792)
+        assert isinstance(result, WeatherData)
+        assert result.source == "no_api_key"
+        assert result.ambient_temp_c is None
+    finally:
+        if original is not None:
+            os.environ["OPENWEATHERMAP_API_KEY"] = original
+
+
+def test_weather_data_cold_stress_flag():
+    """WeatherData with temp < 15°C sets cold_stress_alert."""
+    from backend.weather import WeatherData
+    w = WeatherData(ambient_temp_c=10.0, cold_stress_alert=True)
+    assert w.cold_stress_alert is True
+    assert w.heat_stress_alert is False
+
+
+def test_weather_data_aqi_alert_flag():
+    """WeatherData with AQI >= 3 sets aqi_alert."""
+    from backend.weather import WeatherData
+    w = WeatherData(aqi=3, aqi_alert=True)
+    assert w.aqi_alert is True
+
+
 @pytest.mark.asyncio
 async def test_db_session_rolls_back_on_error():
     """get_db rolls back the session if an exception is raised mid-transaction."""
-    from backend.database import AsyncSessionLocal
-    from backend.models import Patient
-
     rolled_back = False
-    async with AsyncSessionLocal() as session:
+    async with TestSessionLocal() as session:
         try:
             session.add(Patient(id="duplicate-id", name_enc="x", phone_enc=None))
             await session.flush()

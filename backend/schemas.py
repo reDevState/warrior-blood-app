@@ -30,6 +30,7 @@ class TokenResponse(BaseModel):
 class PatientCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     phone: Optional[str] = Field(None, max_length=20)
+    email: Optional[str] = Field(None, max_length=254)
     dob: Optional[date] = None
     diagnosis_type: Optional[str] = Field(None, max_length=64)
 
@@ -37,6 +38,7 @@ class PatientCreate(BaseModel):
 class PatientResponse(BaseModel):
     id: str
     name: Optional[str] = None
+    email: Optional[str] = None
     diagnosis_type: Optional[str]
     enrolled_at: datetime
     latest_risk_tier: Optional[str] = None
@@ -81,7 +83,8 @@ class CheckinRequest(BaseModel):
 
 class SHAPFactor(BaseModel):
     factor: str
-    direction: str  # increasing | decreasing
+    direction: str               # increasing | decreasing
+    contribution: float | None = None  # SHAP value (positive = raises risk)
 
 
 class CheckinResponse(BaseModel):
@@ -90,9 +93,11 @@ class CheckinResponse(BaseModel):
     risk_score: float
     risk_tier: str           # LOW | MODERATE | HIGH
     shap_factors: list[SHAPFactor]
+    suggestion: str          # Plain-English VOC risk management advice
     hydration_status: str    # WELL_HYDRATED | MILD_RISK | MODERATE_RISK | SEVERE_RISK
     hydration_message: str
     hydration_advice: str
+    weather_alerts: list[str] = []
     created_at: datetime
 
 
@@ -133,3 +138,75 @@ class AlertResponse(BaseModel):
     channel: str
     message: str
     queued_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Pain diary
+# ---------------------------------------------------------------------------
+
+class PainDiaryRequest(BaseModel):
+    patient_id: str
+    pain_score: int = Field(..., ge=0, le=10)
+    pain_locations: Optional[list[str]] = None
+    trigger_cold: bool = False
+    trigger_stress: bool = False
+    trigger_exercise: bool = False
+    trigger_infection: bool = False
+    trigger_dehydration: bool = False
+    trigger_other: Optional[str] = None
+    took_paracetamol: bool = False
+    took_ibuprofen: bool = False
+    took_opioid: bool = False
+    pain_relief_rating: Optional[int] = Field(None, ge=0, le=3)
+    notes: Optional[str] = None
+
+    @field_validator("pain_locations")
+    @classmethod
+    def validate_locations(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        valid = {"CHEST", "BACK", "ABDOMEN", "L_ARM", "R_ARM", "L_LEG", "R_LEG", "HEAD", "OTHER"}
+        if v:
+            invalid = [x for x in v if x not in valid]
+            if invalid:
+                raise ValueError(f"Invalid pain locations: {invalid}")
+        return v
+
+
+class PainDiaryResponse(BaseModel):
+    entry_id: str
+    patient_id: str
+    pain_score: int
+    pain_locations: Optional[list[str]]
+    is_breakthrough: bool
+    chest_pain_alert: bool
+    pain_slope_3d: Optional[float]
+    suggestion: str
+    recorded_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Hydration diary
+# ---------------------------------------------------------------------------
+
+class HydrationLogRequest(BaseModel):
+    patient_id: str
+    drink_type: str = Field(..., pattern="^(WATER|JUICE|MILK|TEA|COFFEE|SODA|OTHER)$")
+    drink_volume_ml: int = Field(..., ge=50, le=2000)
+    urine_colour: Optional[int] = Field(None, ge=1, le=8)
+    thirst_level: int = Field(1, ge=1, le=4)
+    dry_mouth: bool = False
+    dizziness: bool = False
+    headache: bool = False
+
+
+class HydrationLogResponse(BaseModel):
+    entry_id: str
+    patient_id: str
+    drink_type: str
+    drink_volume_ml: int
+    daily_total_ml: int
+    daily_total_glasses: float
+    hydration_status: str
+    hydration_message: str
+    hydration_advice: str
+    suggestion: str
+    logged_at: datetime

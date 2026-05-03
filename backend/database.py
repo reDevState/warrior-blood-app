@@ -1,8 +1,8 @@
 """
 database.py — SQLAlchemy async database setup for Warrior Blood MVP.
 
-Uses SQLite for the MVP (zero infrastructure required). Swap DATABASE_URL
-in .env to postgresql+asyncpg://... for production deployment.
+Uses SQLite for tests (aiosqlite). Production uses MySQL via aiomysql —
+set DATABASE_URL=mysql+aiomysql://user:pass@host:3306/dbname?charset=utf8mb4.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL", "sqlite+aiosqlite:///./warrior_blood_mvp.db"
 )
 
-# aiosqlite requires check_same_thread=False for SQLite; ignored by asyncpg
+# aiosqlite requires check_same_thread=False for SQLite; not needed for aiomysql
 connect_args = {"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
 
 engine = create_async_engine(
