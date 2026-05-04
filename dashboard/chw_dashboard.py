@@ -22,8 +22,13 @@ from datetime import datetime
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 API_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+
+# Body-map custom component — served from the static directory next to this file
+_BODY_MAP_DIR = os.path.join(os.path.dirname(__file__), "components", "body_map")
+_body_map_component = components.declare_component("body_map", path=_BODY_MAP_DIR)
 
 # ---------------------------------------------------------------------------
 # Page config — must be first Streamlit call
@@ -868,26 +873,33 @@ _LOCATION_LABELS = {
 
 
 def _pain_log_form(pid: str, key_prefix: str) -> None:
+    bm_key = f"{key_prefix}_bm_sel"
+
+    # Body map lives outside the form — custom components cannot be nested
+    # inside st.form.  Selection is written to session_state[bm_key] so the
+    # submit handler can read it.
+    st.markdown("**Where does it hurt?**")
+    bm_val = _body_map_component(
+        value=st.session_state.get(bm_key, []),
+        key=f"{key_prefix}_bm",
+    )
+    if bm_val is not None:
+        st.session_state[bm_key] = bm_val
+
+    st.markdown("---")
+
     with st.form(f"{key_prefix}_pain_form"):
         pain_score = st.slider("Pain score (0 = none, 10 = worst)", 0, 10, 0,
                                key=f"{key_prefix}_pain_score")
 
-        col1, col2 = st.columns(2)
-        with col1:
-            locations = st.multiselect(
-                "Pain locations",
-                _PAIN_LOCATIONS,
-                format_func=lambda x: _LOCATION_LABELS[x],
-                key=f"{key_prefix}_locs",
-            )
-        with col2:
-            st.markdown("**Triggers**")
-            trigger_cold        = st.checkbox("Cold exposure",    key=f"{key_prefix}_tcold")
-            trigger_stress      = st.checkbox("Stress",           key=f"{key_prefix}_tstress")
-            trigger_exercise    = st.checkbox("Exercise",         key=f"{key_prefix}_texercise")
-            trigger_infection   = st.checkbox("Infection",        key=f"{key_prefix}_tinfect")
-            trigger_dehydration = st.checkbox("Dehydration",      key=f"{key_prefix}_tdehydr")
-            trigger_other       = st.text_input("Other trigger",  key=f"{key_prefix}_tother")
+        st.markdown("**Triggers**")
+        tc1, tc2, tc3 = st.columns(3)
+        trigger_cold        = tc1.checkbox("Cold exposure",  key=f"{key_prefix}_tcold")
+        trigger_stress      = tc1.checkbox("Stress",         key=f"{key_prefix}_tstress")
+        trigger_exercise    = tc2.checkbox("Exercise",       key=f"{key_prefix}_texercise")
+        trigger_infection   = tc2.checkbox("Infection",      key=f"{key_prefix}_tinfect")
+        trigger_dehydration = tc3.checkbox("Dehydration",    key=f"{key_prefix}_tdehydr")
+        trigger_other       = st.text_input("Other trigger", key=f"{key_prefix}_tother")
 
         st.markdown("**Medication taken**")
         mc1, mc2, mc3 = st.columns(3)
@@ -909,6 +921,7 @@ def _pain_log_form(pid: str, key_prefix: str) -> None:
                                           use_container_width=True)
 
     if submitted:
+        locations = st.session_state.get(bm_key) or []
         resp = _api("post", "/pain", headers=_headers(), json={
             "patient_id": pid,
             "pain_score": int(pain_score),
@@ -926,6 +939,8 @@ def _pain_log_form(pid: str, key_prefix: str) -> None:
             "notes": notes or None,
         })
         if resp and resp.status_code == 200:
+            # Clear body map selection after successful submit
+            st.session_state[bm_key] = []
             _show_pain_result(resp.json())
         else:
             detail = resp.json().get("detail", "Unknown error") if resp else "No response"
