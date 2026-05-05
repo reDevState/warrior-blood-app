@@ -26,8 +26,8 @@ import streamlit.components.v1 as components
 
 API_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
-# Body-map custom component — served from the static directory next to this file
-_BODY_MAP_DIR = os.path.join(os.path.dirname(__file__), "components", "body_map")
+# Body-map custom component — absolute path ensures correct resolution inside Docker
+_BODY_MAP_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "components", "body_map")
 _body_map_component = components.declare_component("body_map", path=_BODY_MAP_DIR)
 
 # ---------------------------------------------------------------------------
@@ -106,28 +106,113 @@ def login_page() -> None:
     col_left, col_mid, col_right = st.columns([1, 2, 1])
     with col_mid:
         st.markdown("## 🩸 Warrior Blood")
-        st.subheader("Sign in")
 
-        with st.form("login"):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Sign in", use_container_width=True)
+        tab_signin, tab_register, tab_forgot = st.tabs(
+            ["Sign in", "Register patient", "Forgot password"]
+        )
 
-        if submitted:
-            resp = _api("post", "/auth/token",
-                        data={"username": username, "password": password})
-            if resp and resp.status_code == 200:
-                token = resp.json()["access_token"]
-                st.session_state["token"]    = token
-                st.session_state["username"] = username
-                st.session_state["role"]     = _decode_role(token)
-                st.rerun()
-            else:
-                st.error("Login failed — check username and password.")
+        # ── Sign in ──────────────────────────────────────────────────────────
+        with tab_signin:
+            with st.form("login"):
+                username = st.text_input("Username")
+                password = st.text_input("Password", type="password")
+                submitted = st.form_submit_button("Sign in", use_container_width=True)
 
-        st.divider()
-        st.caption("**CHW demo:** test_chw / chwpassword")
-        st.caption("**Patient demo:** test_patient / testpassword")
+            if submitted:
+                resp = _api("post", "/auth/token",
+                            data={"username": username, "password": password})
+                if resp and resp.status_code == 200:
+                    token = resp.json()["access_token"]
+                    st.session_state["token"]    = token
+                    st.session_state["username"] = username
+                    st.session_state["role"]     = _decode_role(token)
+                    st.rerun()
+                else:
+                    st.error("Login failed — check username and password.")
+
+            st.divider()
+            st.caption("**CHW demo:** test_chw / chwpassword")
+            st.caption("**Patient demo:** test_patient / testpassword")
+
+        # ── Register patient (CHW credentials required) ───────────────────
+        with tab_register:
+            st.caption("CHW credentials are required to register a new patient.")
+            with st.form("login_register"):
+                chw_user  = st.text_input("CHW username", key="reg_chw_user")
+                chw_pass  = st.text_input("CHW password", type="password", key="reg_chw_pass")
+                st.divider()
+                reg_name  = st.text_input("Patient full name", key="reg_name")
+                reg_email = st.text_input("Patient email", placeholder="patient@example.com", key="reg_email")
+                reg_phone = st.text_input("Phone number (optional)", key="reg_phone")
+                reg_dob   = st.date_input("Date of birth", value=None, key="reg_dob")
+                reg_diag  = st.selectbox(
+                    "Diagnosis type",
+                    ["HbSS", "HbSC", "HbS/beta-thalassaemia", "Other"],
+                    key="reg_diag",
+                )
+                reg_submitted = st.form_submit_button("Register patient", use_container_width=True)
+
+            if reg_submitted:
+                if not reg_name:
+                    st.error("Patient name is required.")
+                else:
+                    auth_resp = _api("post", "/auth/token",
+                                     data={"username": chw_user, "password": chw_pass})
+                    if not auth_resp or auth_resp.status_code != 200:
+                        st.error("CHW login failed — check your username and password.")
+                    else:
+                        chw_token = auth_resp.json()["access_token"]
+                        if _decode_role(chw_token) not in ("chw", "admin"):
+                            st.error("Only CHW or admin accounts can register patients.")
+                        else:
+                            pat_resp = _api("post", "/patients",
+                                            headers={"Authorization": f"Bearer {chw_token}"},
+                                            json={
+                                                "name": reg_name,
+                                                "email": reg_email.strip() or None,
+                                                "phone": reg_phone or None,
+                                                "dob": str(reg_dob) if reg_dob else None,
+                                                "diagnosis_type": reg_diag,
+                                            })
+                            if pat_resp and pat_resp.status_code == 201:
+                                data = pat_resp.json()
+                                pid  = data["id"]
+                                st.success(f"Patient **{reg_name}** registered successfully.")
+                                if reg_email.strip():
+                                    st.info(
+                                        f"The patient can sign in and link their record using email: "
+                                        f"**{reg_email.strip()}**"
+                                    )
+                                else:
+                                    st.info(f"Patient ID: `{pid}` — share this so the patient can link their account.")
+                            else:
+                                detail = pat_resp.json().get("detail", "Unknown error") if pat_resp else "No response"
+                                st.error(f"Registration failed: {detail}")
+
+        # ── Forgot password ───────────────────────────────────────────────
+        with tab_forgot:
+            st.caption("Enter your username to receive a temporary password.")
+            with st.form("forgot_password"):
+                fp_username  = st.text_input("Username", key="fp_user")
+                fp_submitted = st.form_submit_button("Reset password", use_container_width=True)
+
+            if fp_submitted:
+                if not fp_username:
+                    st.error("Please enter your username.")
+                else:
+                    fp_resp = _api("post", "/auth/forgot-password",
+                                   json={"username": fp_username})
+                    if fp_resp and fp_resp.status_code == 200:
+                        data = fp_resp.json()
+                        st.success("Password reset.")
+                        st.markdown(
+                            f"**Temporary password:** `{data['temp_password']}`\n\n"
+                            "Sign in with this password, then contact your administrator to set a permanent one."
+                        )
+                    elif fp_resp and fp_resp.status_code == 404:
+                        st.error("Username not found.")
+                    else:
+                        st.error("Password reset failed. Please try again.")
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +244,6 @@ def chw_dashboard() -> None:
         page = st.radio("Navigation", [
             "Patient triage",
             "Log for patient",
-            "Register patient",
             "About",
         ])
         if st.button("Sign out", use_container_width=True):
@@ -170,8 +254,6 @@ def chw_dashboard() -> None:
         chw_triage_page()
     elif page == "Log for patient":
         chw_log_page()
-    elif page == "Register patient":
-        register_page()
     else:
         about_page()
 
