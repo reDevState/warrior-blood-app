@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: transparent;
+      padding: 6px 8px 10px;
+    }
+
+    .header {
+      font-size: 12px;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 6px;
+    }
+
+    .figures {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
+    .fig-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .fig-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #6b7280;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    /* SVG region styles */
+    .region {
+      cursor: pointer;
+      transition: fill 0.12s, stroke 0.12s;
+    }
+    .region:hover { opacity: 0.75; }
+    .region.sel { fill: #ef4444 !important; stroke: #b91c1c !important; }
+
+    .rlabel {
+      font-size: 8.5px;
+      fill: #6b7280;
+      pointer-events: none;
+      text-anchor: middle;
+      dominant-baseline: middle;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-weight: 600;
+      transition: fill 0.12s;
+    }
+    .region.sel ~ .rlabel,
+    .sel-label { fill: white !important; }
+
+    /* We use data-ref on labels matching region id */
+    text[data-ref].active { fill: white; }
+
+    .side-hint {
+      font-size: 7.5px;
+      fill: #9ca3af;
+      font-family: 'Segoe UI', Arial, sans-serif;
+    }
+
+    /* Other button */
+    .other-row {
+      display: flex;
+      justify-content: center;
+      margin-top: 8px;
+    }
+
+    .other-btn {
+      padding: 4px 20px;
+      border: 1.5px solid #d1d5db;
+      border-radius: 20px;
+      background: white;
+      cursor: pointer;
+      font-size: 11px;
+      color: #374151;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      transition: all 0.12s;
+    }
+    .other-btn:hover { background: #f9fafb; }
+    .other-btn.sel {
+      background: #ef4444;
+      border-color: #b91c1c;
+      color: white;
+    }
+
+    /* Selected display */
+    .sel-display {
+      margin-top: 8px;
+      min-height: 24px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      justify-content: center;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #fee2e2;
+      border: 1px solid #fca5a5;
+      border-radius: 12px;
+      padding: 2px 10px;
+      font-size: 10px;
+      color: #b91c1c;
+      font-weight: 600;
+    }
+
+    .tag .x {
+      cursor: pointer;
+      font-size: 11px;
+      line-height: 1;
+      color: #ef4444;
+    }
+    .tag .x:hover { color: #b91c1c; }
+
+    .none-hint {
+      font-size: 10px;
+      color: #9ca3af;
+      font-style: italic;
+      align-self: center;
+    }
+
+    .legend {
+      margin-top: 6px;
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      font-size: 9px;
+      color: #9ca3af;
+    }
+    .legend span { display: flex; align-items: center; gap: 4px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .dot-gray { background: #d1d5db; border: 1px solid #9ca3af; }
+    .dot-red  { background: #ef4444; border: 1px solid #b91c1c; }
+  </style>
+</head>
+<body>
+
+<div class="header">Select all painful areas — tap to mark, tap again to clear</div>
+
+<div class="figures">
+
+  <!-- ═══ FRONT VIEW ═══ -->
+  <div class="fig-wrap">
+    <div class="fig-label">Front</div>
+    <svg width="130" height="310" viewBox="0 0 130 310" xmlns="http://www.w3.org/2000/svg">
+
+      <!-- Side labels -->
+      <text class="side-hint" x="6" y="308">← Your right</text>
+      <text class="side-hint" x="124" y="308" text-anchor="end">Your left →</text>
+
+      <!-- HEAD -->
+      <circle id="f-HEAD" data-code="HEAD" class="region"
+              cx="65" cy="33" r="26" fill="#dde1e7" stroke="#bfc6d0" stroke-width="1.5"/>
+      <text id="lf-HEAD" data-ref="f-HEAD" class="rlabel" x="65" y="33">Head</text>
+
+      <!-- NECK -->
+      <rect x="60" y="57" width="10" height="11" fill="#dde1e7" stroke="#bfc6d0" stroke-width="0.5"/>
+
+      <!-- R_ARM  patient's right = viewer's LEFT -->
+      <rect id="f-R_ARM" data-code="R_ARM" class="region"
+            x="8" y="66" width="22" height="94" rx="9"
+            fill="#dde1e7" stroke="#bfc6d0" stroke-width="1.5"/>
+      <text id="lf-R_ARM" data-ref="f-R_ARM" class="rlabel" x="19" y="113">R arm</text>
+
+      <!-- L_ARM  patient's left = viewer's RIGHT -->
+      <rect id="f-L_ARM" data-code="L_ARM" class="region"
+            x="100" y="66" width="22" height="94" rx="9"
+            fill="#dde1e7" stroke="#bfc6d0" stroke-width="1.5"/>
+      <text id="lf-L_ARM" data-ref="f-L_ARM" class="rlabel" x="111" y="113">L arm</text>
+
+      <!-- CHEST  upper torso -->
+      <rect id="f-CHEST" data-code="CHEST" class="region"
+            x="32" y="66" width="66" height="56" rx="5"
+            fill="#dde1e7" stroke="#bfc6d0" stroke-width="1.5"/>
+      <text id="lf-CHEST" data-ref="f-CHEST" class="rlabel" x="65" y="96">Chest</text>
+
+      <!-- ABDOMEN  lower torso -->
+      <rect id="f-ABDOMEN" data-code="ABDOMEN" class="region"
+            x="32" y="122" width="66" height="54" rx="5"
+            fill="#dde1e7" stroke="#bfc6d0" stroke-width="1.5"/>
+      <text id="lf-ABDOMEN" data-ref="f-ABDOMEN" class="rlabel" x="65" y="152">Abdomen</text>
+
+      <!-- Hip connector -->
+      <rect x="32" y="175" width="66" height="10" fill="#c8cdd6" stroke="none"/>
+
+      <!-- R_LEG  patient's right = viewer's LEFT -->
+      <rect id="f-R_LEG" data-code="R_LEG" class="region"
+            x="32" y="183" width="30" height="110" rx="10"
+            fill="#dde1e7" stroke="#bfc6d0" stroke-width="1.5"/>
+      <text id="lf-R_LEG" data-ref="f-R_LEG" class="rlabel" x="47" y="238">R leg</text>
+
+      <!-- L_LEG  patient's left = viewer's RIGHT -->
+      <rect id="f-L_LEG" data-code="L_LEG" class="region"
+            x="68" y="183" width="30" height="110" rx="10"
+            fill="#dde1e7" stroke="#bfc6d0" stroke-width="1.5"/>
+      <text id="lf-L_LEG" data-ref="f-L_LEG" class="rlabel" x="83" y="238">L leg</text>
+
+    </svg>
+  </div>
+
+  <!-- ═══ BACK VIEW ═══ -->
+  <div class="fig-wrap">
+    <div class="fig-label">Back</div>
+    <svg width="130" height="310" viewBox="0 0 130 310" xmlns="http://www.w3.org/2000/svg">
+
+      <!-- Side labels (mirrored) -->
+      <text class="side-hint" x="6" y="308">← Your left</text>
+      <text class="side-hint" x="124" y="308" text-anchor="end">Your right →</text>
+
+      <!-- HEAD (back) -->
+      <circle id="b-HEAD" data-code="HEAD" class="region"
+              cx="65" cy="33" r="26" fill="#dde1e7" stroke="#bfc6d0" stroke-width="1.5"/>
+      <text id="lb-HEAD" data-ref="b-HEAD" class="rlabel" x="65" y="33">Head</text>
+
+      <!-- NECK (back) -->
+      <rect x="60" y="57" width="10" height="11" fill="#dde1e7" stroke="#bfc6d0" stroke-width="0.5"/>
+
+      <!-- L_ARM  back view: patient's left = viewer's LEFT -->
+      <rect id="b-L_ARM" data-code="L_ARM" class="region"
+            x="8" y="66" width="22" height="94" rx="9"
+            fill="#dde1e7" stroke="#bfc6d0" stroke-width="1.5"/>
+      <text id="lb-L_ARM" data-ref="b-L_ARM" class="rlabel" x="19" y="113">L arm</text>
+
+      <!-- R_ARM  back view: patient's right = viewer's RIGHT -->
+      <rect id="b-R_ARM" data-code="R_ARM" class="region"
+            x="100" y="66" width="22" height="94" rx="9"
+            fill="#dde1e7" stroke="#bfc6d0" stroke-width="1.5"/>
+      <text id="lb-R_ARM" data-ref="b-R_ARM" class="rlabel" x="111" y="113">R arm</text>
+
+      <!-- BACK  upper -->
+      <rect id="b-BACK-U" data-code="BACK" class="region"
+            x="32" y="66" width="66" height="56" rx="5"
+            fill="#dde1e7" stroke="#bfc6d0" stroke-width="1.5"/>
+      <text id="lb-BACK-U" data-ref="b-BACK-U" class="rlabel" x="65" y="96">Upper back</text>
+
+      <!-- BACK  lower -->
+      <rect id="b-BACK-L" data-code="BACK" class="region"
+            x="32" y="122" width="66" height="54" rx="5"
+            fill="#dde1e7" stroke="#bfc6d0" stroke-width="1.5"/>
+      <text id="lb-BACK-L" data-ref="b-BACK-L" class="rlabel" x="65" y="152">Lower back</text>
+
+      <!-- Hip connector -->
+      <rect x="32" y="175" width="66" height="10" fill="#c8cdd6" stroke="none"/>
+
+      <!-- L_LEG  back view: patient's left = viewer's LEFT -->
+      <rect id="b-L_LEG" data-code="L_LEG" class="region"
+            x="32" y="183" width="30" height="110" rx="10"
+            fill="#dde1e7" stroke="#bfc6d0" stroke-width="1.5"/>
+      <text id="lb-L_LEG" data-ref="b-L_LEG" class="rlabel" x="47" y="238">L leg</text>
+
+      <!-- R_LEG  back view: patient's right = viewer's RIGHT -->
+      <rect id="b-R_LEG" data-code="R_LEG" class="region"
+            x="68" y="183" width="30" height="110" rx="10"
+            fill="#dde1e7" stroke="#bfc6d0" stroke-width="1.5"/>
+      <text id="lb-R_LEG" data-ref="b-R_LEG" class="rlabel" x="83" y="238">R leg</text>
+
+    </svg>
+  </div>
+
+</div>
+
+<!-- OTHER button -->
+<div class="other-row">
+  <button id="btn-OTHER" class="other-btn" onclick="toggleCode('OTHER')">＋ Other</button>
+</div>
+
+<!-- Selected tags display -->
+<div id="sel-display" class="sel-display">
+  <span class="none-hint">No areas selected</span>
+</div>
+
+<!-- Legend -->
+<div class="legend">
+  <span><span class="dot dot-gray"></span>Not selected</span>
+  <span><span class="dot dot-red"></span>Selected (painful)</span>
+</div>
+
+<script>
+  // ── State ────────────────────────────────────────────────────────────────
+  const selected = new Set();
+
+  const LABELS = {
+    HEAD: "Head", CHEST: "Chest", ABDOMEN: "Abdomen",
+    BACK: "Back", L_ARM: "Left arm", R_ARM: "Right arm",
+    L_LEG: "Left leg", R_LEG: "Right leg", OTHER: "Other",
+  };
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function allElemsForCode(code) {
+    // SVG regions
+    const els = Array.from(document.querySelectorAll(`.region[data-code="${code}"]`));
+    return els;
+  }
+
+  function applyVisual(code, active) {
+    allElemsForCode(code).forEach(el => {
+      if (active) el.classList.add("sel");
+      else el.classList.remove("sel");
+    });
+    // Update label colours via data-ref lookup
+    document.querySelectorAll(`text[data-ref]`).forEach(t => {
+      const ref = document.getElementById(t.dataset.ref);
+      if (ref && ref.dataset.code === code) {
+        t.style.fill = active ? "white" : "";
+      }
+    });
+    // OTHER button
+    if (code === "OTHER") {
+      const btn = document.getElementById("btn-OTHER");
+      if (active) btn.classList.add("sel");
+      else btn.classList.remove("sel");
+    }
+  }
+
+  function toggleCode(code) {
+    if (selected.has(code)) {
+      selected.delete(code);
+      applyVisual(code, false);
+    } else {
+      selected.add(code);
+      applyVisual(code, true);
+    }
+    renderTags();
+    sendValue();
+  }
+
+  // ── Tag display ───────────────────────────────────────────────────────────
+  function renderTags() {
+    const div = document.getElementById("sel-display");
+    if (selected.size === 0) {
+      div.innerHTML = '<span class="none-hint">No areas selected</span>';
+      return;
+    }
+    div.innerHTML = Array.from(selected)
+      .map(c => `<span class="tag">${LABELS[c] || c}<span class="x" onclick="toggleCode('${c}')">&times;</span></span>`)
+      .join("");
+  }
+
+  // ── Streamlit messaging ───────────────────────────────────────────────────
+  function sendValue() {
+    window.parent.postMessage({
+      type: "streamlit:setComponentValue",
+      value: Array.from(selected),
+      dataType: "json",
+    }, "*");
+  }
+
+  function setHeight() {
+    const h = document.body.scrollHeight + 10;
+    window.parent.postMessage({ type: "streamlit:setFrameHeight", height: h }, "*");
+  }
+
+  // ── Receive renders from Streamlit (restores state on re-render) ──────────
+  window.addEventListener("message", (event) => {
+    if (event.data.type !== "streamlit:render") return;
+    const args = event.data.args || {};
+    const initialValue = args.value;
+    if (Array.isArray(initialValue)) {
+      // Clear all first
+      selected.clear();
+      document.querySelectorAll(".region.sel").forEach(el => el.classList.remove("sel"));
+      document.getElementById("btn-OTHER").classList.remove("sel");
+      document.querySelectorAll("text[data-ref]").forEach(t => { t.style.fill = ""; });
+      // Apply incoming selections
+      initialValue.forEach(code => {
+        selected.add(code);
+        applyVisual(code, true);
+      });
+      renderTags();
+    }
+    setHeight();
+  });
+
+  // ── Wire up SVG region clicks ─────────────────────────────────────────────
+  document.querySelectorAll(".region").forEach(el => {
+    el.addEventListener("click", () => toggleCode(el.dataset.code));
+  });
+
+  // ── Ready signal ──────────────────────────────────────────────────────────
+  window.parent.postMessage({ type: "streamlit:componentReady", apiVersion: 1 }, "*");
+  window.addEventListener("load", setHeight);
+</script>
+</body>
+</html>

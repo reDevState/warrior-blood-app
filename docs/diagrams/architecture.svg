@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 560" font-family="'Segoe UI',Arial,sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0,10 3.5,0 7" fill="#64748b"/>
+    </marker>
+    <marker id="arr-b" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0,10 3.5,0 7" fill="#2563eb"/>
+    </marker>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="#00000022"/>
+    </filter>
+  </defs>
+
+  <!-- Page background -->
+  <rect width="860" height="560" fill="#f0f4f8"/>
+
+  <!-- Title -->
+  <text x="430" y="34" text-anchor="middle" font-size="20" font-weight="700" fill="#0f172a">System Architecture — Warrior Blood</text>
+  <text x="430" y="54" text-anchor="middle" font-size="12" fill="#64748b">Four-container Docker Compose deployment with in-process ML inference</text>
+
+  <!-- Docker Compose boundary -->
+  <rect x="220" y="130" width="600" height="400" rx="12" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2" stroke-dasharray="10,5"/>
+  <rect x="220" y="120" width="170" height="22" rx="4" fill="#94a3b8"/>
+  <text x="305" y="134" text-anchor="middle" font-size="11" fill="white" font-weight="600">docker-compose.yml</text>
+
+  <!-- Browser box (outside Docker) -->
+  <rect x="30" y="70" width="170" height="80" rx="10" fill="white" stroke="#475569" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="30" y="70" width="170" height="28" rx="10" fill="#475569"/>
+  <rect x="30" y="85" width="170" height="13" fill="#475569"/>
+  <text x="115" y="88" text-anchor="middle" font-size="12" font-weight="700" fill="white">Browser</text>
+  <text x="115" y="118" text-anchor="middle" font-size="11" fill="#334155">CHW / Patient</text>
+  <text x="115" y="135" text-anchor="middle" font-size="10" fill="#64748b">localhost</text>
+
+  <!-- Arrow: Browser → Dashboard -->
+  <line x1="115" y1="150" x2="310" y2="210" stroke="#64748b" stroke-width="1.5" marker-end="url(#arr)" stroke-dasharray="5,3"/>
+  <text x="185" y="188" font-size="10" fill="#64748b" transform="rotate(-25,185,188)">:8501</text>
+
+  <!-- Arrow: Browser → API (Swagger) -->
+  <line x1="200" y1="108" x2="560" y2="185" stroke="#94a3b8" stroke-width="1" marker-end="url(#arr)" stroke-dasharray="4,4"/>
+  <text x="390" y="132" font-size="10" fill="#94a3b8">:8000/docs (optional)</text>
+
+  <!-- ── Dashboard container ── -->
+  <rect x="240" y="160" width="200" height="130" rx="10" fill="white" stroke="#2563eb" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="240" y="160" width="200" height="32" rx="10" fill="#2563eb"/>
+  <rect x="240" y="178" width="200" height="14" fill="#2563eb"/>
+  <text x="340" y="181" text-anchor="middle" font-size="13" font-weight="700" fill="white">Dashboard</text>
+  <text x="340" y="210" text-anchor="middle" font-size="11" fill="#1d4ed8" font-weight="600">Streamlit 1.35</text>
+  <text x="340" y="228" text-anchor="middle" font-size="10" fill="#334155">CHW triage • Patient portal</text>
+  <text x="340" y="244" text-anchor="middle" font-size="10" fill="#334155">Role-based JWT routing</text>
+  <!-- port badge -->
+  <rect x="275" y="270" width="130" height="18" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="1"/>
+  <text x="340" y="283" text-anchor="middle" font-size="10" fill="#1d4ed8">port 8501 → 8501</text>
+
+  <!-- ── API container ── -->
+  <rect x="490" y="160" width="300" height="170" rx="10" fill="white" stroke="#2563eb" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="490" y="160" width="300" height="32" rx="10" fill="#2563eb"/>
+  <rect x="490" y="178" width="300" height="14" fill="#2563eb"/>
+  <text x="640" y="181" text-anchor="middle" font-size="13" font-weight="700" fill="white">API</text>
+  <text x="640" y="210" text-anchor="middle" font-size="11" fill="#1d4ed8" font-weight="600">FastAPI 0.111 · Python 3.12</text>
+  <text x="640" y="228" text-anchor="middle" font-size="10" fill="#334155">JWT auth · Fernet PHI encryption</text>
+  <text x="640" y="244" text-anchor="middle" font-size="10" fill="#334155">SQLAlchemy 2 async · Alembic</text>
+  <!-- ONNX sub-box -->
+  <rect x="510" y="258" width="260" height="52" rx="7" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="640" y="278" text-anchor="middle" font-size="11" fill="#6d28d9" font-weight="600">ONNX Runtime (in-process)</text>
+  <text x="640" y="295" text-anchor="middle" font-size="10" fill="#7c3aed">LightGBM model · SHAP TreeExplainer</text>
+  <!-- port badge -->
+  <rect x="565" y="318" width="150" height="18" rx="9" fill="#dbeafe" stroke="#2563eb" stroke-width="1"/>
+  <text x="640" y="331" text-anchor="middle" font-size="10" fill="#1d4ed8">port 8000 → 8000</text>
+
+  <!-- Arrow: Dashboard → API -->
+  <line x1="440" y1="225" x2="490" y2="225" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arr-b)"/>
+  <text x="459" y="218" font-size="9" fill="#2563eb">REST</text>
+
+  <!-- ── MySQL container ── -->
+  <rect x="240" y="380" width="220" height="120" rx="10" fill="white" stroke="#0d9488" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="240" y="380" width="220" height="32" rx="10" fill="#0d9488"/>
+  <rect x="240" y="398" width="220" height="14" fill="#0d9488"/>
+  <text x="350" y="401" text-anchor="middle" font-size="13" font-weight="700" fill="white">Database</text>
+  <text x="350" y="430" text-anchor="middle" font-size="11" fill="#0f766e" font-weight="600">MySQL 8.0</text>
+  <text x="350" y="447" text-anchor="middle" font-size="10" fill="#334155">7 tables · Fernet-encrypted PHI</text>
+  <text x="350" y="463" text-anchor="middle" font-size="10" fill="#334155">Persistent volume: mysql_data</text>
+  <!-- port badge -->
+  <rect x="275" y="476" width="150" height="18" rx="9" fill="#ccfbf1" stroke="#0d9488" stroke-width="1"/>
+  <text x="350" y="489" text-anchor="middle" font-size="10" fill="#0f766e">host:3307 → 3306</text>
+
+  <!-- ── Redis container ── -->
+  <rect x="510" y="380" width="220" height="120" rx="10" fill="white" stroke="#dc2626" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="510" y="380" width="220" height="32" rx="10" fill="#dc2626"/>
+  <rect x="510" y="398" width="220" height="14" fill="#dc2626"/>
+  <text x="620" y="401" text-anchor="middle" font-size="13" font-weight="700" fill="white">Cache / Queue</text>
+  <text x="620" y="430" text-anchor="middle" font-size="11" fill="#b91c1c" font-weight="600">Redis 7-alpine</text>
+  <text x="620" y="447" text-anchor="middle" font-size="10" fill="#334155">Weather cache (6 h TTL)</text>
+  <text x="620" y="463" text-anchor="middle" font-size="10" fill="#334155">SMS alert queue stub</text>
+  <!-- port badge -->
+  <rect x="545" y="476" width="150" height="18" rx="9" fill="#fee2e2" stroke="#dc2626" stroke-width="1"/>
+  <text x="620" y="489" text-anchor="middle" font-size="10" fill="#b91c1c">port 6379 → 6379</text>
+
+  <!-- Arrow: API → DB -->
+  <line x1="600" y1="338" x2="420" y2="378" stroke="#0d9488" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="488" y="360" font-size="9" fill="#0d9488" transform="rotate(-18,488,360)">async SQLAlchemy</text>
+
+  <!-- Arrow: API → Redis -->
+  <line x1="660" y1="338" x2="640" y2="378" stroke="#dc2626" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Arrow: API → OpenWeatherMap (external) -->
+  <rect x="720" y="70" width="120" height="50" rx="8" fill="white" stroke="#f59e0b" stroke-width="2"/>
+  <text x="780" y="92" text-anchor="middle" font-size="10" font-weight="600" fill="#92400e">OpenWeatherMap</text>
+  <text x="780" y="108" text-anchor="middle" font-size="9" fill="#b45309">External API (cached)</text>
+  <line x1="740" y1="180" x2="778" y2="120" stroke="#f59e0b" stroke-width="1" marker-end="url(#arr)" stroke-dasharray="5,3"/>
+
+  <!-- Startup order note -->
+  <rect x="30" y="320" width="170" height="90" rx="8" fill="white" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="115" y="340" text-anchor="middle" font-size="10" font-weight="700" fill="#334155">Startup order</text>
+  <text x="42" y="358" font-size="10" fill="#64748b">1. db (health check)</text>
+  <text x="42" y="374" font-size="10" fill="#64748b">2. redis</text>
+  <text x="42" y="390" font-size="10" fill="#64748b">3. api (depends_on db)</text>
+  <text x="42" y="406" font-size="10" fill="#64748b">4. dashboard</text>
+
+  <!-- Legend -->
+  <rect x="30" y="430" width="170" height="100" rx="8" fill="white" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="115" y="450" text-anchor="middle" font-size="10" font-weight="700" fill="#334155">Legend</text>
+  <rect x="42" y="458" width="12" height="12" rx="2" fill="#2563eb"/>
+  <text x="60" y="469" font-size="10" fill="#64748b">Application service</text>
+  <rect x="42" y="476" width="12" height="12" rx="2" fill="#7c3aed"/>
+  <text x="60" y="487" font-size="10" fill="#64748b">ML / inference</text>
+  <rect x="42" y="494" width="12" height="12" rx="2" fill="#0d9488"/>
+  <text x="60" y="505" font-size="10" fill="#64748b">Persistence</text>
+  <line x1="42" y1="516" x2="54" y2="516" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <text x="60" y="520" font-size="10" fill="#64748b">Optional / external</text>
+</svg>

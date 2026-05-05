@@ -23,6 +23,15 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class ForgotPasswordRequest(BaseModel):
+    username: str
+
+
+class ForgotPasswordResponse(BaseModel):
+    temp_password: str
+    message: str
+
+
 # ---------------------------------------------------------------------------
 # Patient registration
 # ---------------------------------------------------------------------------

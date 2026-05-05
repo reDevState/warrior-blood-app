@@ -15,6 +15,8 @@ Routes:
 from __future__ import annotations
 
 import logging
+import secrets
+import string
 from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta
 from typing import Annotated
@@ -38,6 +40,8 @@ from backend.schemas import (
     CheckinRequest,
     CheckinResponse,
     DiaryEntryResponse,
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
     HydrationLogRequest,
     HydrationLogResponse,
     PainDiaryRequest,
@@ -166,6 +170,33 @@ async def login(
         )
     token = create_access_token({"sub": user.username, "role": user.role})
     return TokenResponse(access_token=token)
+
+
+@app.post("/auth/forgot-password", response_model=ForgotPasswordResponse, tags=["auth"])
+async def forgot_password(
+    data: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Reset a user's password and return a temporary password.
+
+    MVP: displays the temp password directly — in production this would
+    be sent via email instead of returned in the response body.
+    """
+    result = await db.execute(select(User).where(User.username == data.username))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Username not found")
+
+    alphabet = string.ascii_letters + string.digits
+    temp_pw = "".join(secrets.choice(alphabet) for _ in range(10))
+    user.hashed_password = pwd_context.hash(temp_pw)
+    await db.commit()
+
+    return ForgotPasswordResponse(
+        temp_password=temp_pw,
+        message=f"Password reset for {data.username}. Use this temporary password to sign in, then change it.",
+    )
 
 
 # ---------------------------------------------------------------------------
