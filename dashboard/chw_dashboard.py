@@ -964,6 +964,7 @@ def _pain_log_form(pid: str, key_prefix: str) -> None:
     bm_val = _body_map_component(
         value=st.session_state.get(bm_key, []),
         key=f"{key_prefix}_bm",
+        height=450,
     )
     if bm_val is not None:
         st.session_state[bm_key] = bm_val

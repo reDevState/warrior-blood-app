@@ -373,12 +373,13 @@
     el.addEventListener("click", () => toggleCode(el.dataset.code));
   });
 
-  // ── Ready signal — retry until Streamlit responds with streamlit:render ───
-  // Streamlit may not have attached its message listener yet when this runs,
-  // so we poll every 100ms until we receive the first render message.
+  // ── Ready signal — send componentReady first, then height ───────────────
+  // componentReady MUST arrive before setFrameHeight; Streamlit ignores
+  // height messages from components it hasn't yet acknowledged as ready.
+  // We retry every 100ms until we receive the first streamlit:render reply.
   window.addEventListener("load", () => {
-    sendHeight();
     sendReady();
+    sendHeight();
     readyTimer = setInterval(() => {
       if (!streamlitReady) {
         sendReady();
