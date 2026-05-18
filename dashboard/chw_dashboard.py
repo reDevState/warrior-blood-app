@@ -949,17 +949,12 @@ _LOCATION_LABELS = {
 }
 
 
-_PAIN_LOCATIONS = [
-    "Head", "Chest", "Abdomen", "Back",
-    "Left arm", "Right arm", "Left leg", "Right leg", "Other",
-]
-
-
 def _pain_log_form(pid: str, key_prefix: str) -> None:
     with st.form(f"{key_prefix}_pain_form"):
         locations = st.multiselect(
             "Where does it hurt?",
             options=_PAIN_LOCATIONS,
+            format_func=lambda x: _LOCATION_LABELS.get(x, x),
             key=f"{key_prefix}_locations",
         )
 
@@ -1011,10 +1006,10 @@ def _pain_log_form(pid: str, key_prefix: str) -> None:
             "pain_relief_rating": int(relief) if any_med else None,
             "notes": notes or None,
         })
-        if resp and resp.status_code == 200:
+        if resp is not None and resp.status_code == 200:
             _show_pain_result(resp.json())
         else:
-            detail = resp.json().get("detail", "Unknown error") if resp else "No response"
+            detail = resp.json().get("detail", "Unknown error") if resp is not None else "No response"
             st.error(f"Failed: {detail}")
 
 
