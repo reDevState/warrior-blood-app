@@ -22,13 +22,8 @@ from datetime import datetime
 import plotly.graph_objects as go
 import requests
 import streamlit as st
-import streamlit.components.v1 as components
 
 API_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
-
-# Body-map custom component — absolute path ensures correct resolution inside Docker
-_BODY_MAP_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "components", "body_map")
-_body_map_component = components.declare_component("body_map", path=_BODY_MAP_DIR)
 
 # ---------------------------------------------------------------------------
 # Page config — must be first Streamlit call
@@ -955,22 +950,14 @@ _LOCATION_LABELS = {
 
 
 def _pain_log_form(pid: str, key_prefix: str) -> None:
-    bm_key = f"{key_prefix}_bm_sel"
-
-    # Body map lives outside the form — custom components cannot be nested
-    # inside st.form.  Selection is written to session_state[bm_key] so the
-    # submit handler can read it.
-    st.markdown("**Where does it hurt?**")
-    bm_val = _body_map_component(
-        value=st.session_state.get(bm_key, []),
-        key=f"{key_prefix}_bm",
-    )
-    if bm_val is not None:
-        st.session_state[bm_key] = bm_val
-
-    st.markdown("---")
-
     with st.form(f"{key_prefix}_pain_form"):
+        locations = st.multiselect(
+            "Where does it hurt?",
+            options=_PAIN_LOCATIONS,
+            format_func=lambda x: _LOCATION_LABELS.get(x, x),
+            key=f"{key_prefix}_locations",
+        )
+
         pain_score = st.slider("Pain score (0 = none, 10 = worst)", 0, 10, 0,
                                key=f"{key_prefix}_pain_score")
 
@@ -1003,7 +990,6 @@ def _pain_log_form(pid: str, key_prefix: str) -> None:
                                           use_container_width=True)
 
     if submitted:
-        locations = st.session_state.get(bm_key) or []
         resp = _api("post", "/pain", headers=_headers(), json={
             "patient_id": pid,
             "pain_score": int(pain_score),
@@ -1020,12 +1006,10 @@ def _pain_log_form(pid: str, key_prefix: str) -> None:
             "pain_relief_rating": int(relief) if any_med else None,
             "notes": notes or None,
         })
-        if resp and resp.status_code == 200:
-            # Clear body map selection after successful submit
-            st.session_state[bm_key] = []
+        if resp is not None and resp.status_code == 200:
             _show_pain_result(resp.json())
         else:
-            detail = resp.json().get("detail", "Unknown error") if resp else "No response"
+            detail = resp.json().get("detail", "Unknown error") if resp is not None else "No response"
             st.error(f"Failed: {detail}")
 
 
